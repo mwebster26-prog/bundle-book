@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bundle Book</title>
+<meta name="description" content="Offline yard notebook for stone bundles: photos, sizes, prices and decisions.">
+<meta name="theme-color" content="#f2c200">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Bundle Book">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* VOICE: working field tool, calm and exact, like a buyer's yard notebook.
+   IDEA: the yellow bundle tag stapled to every stone bundle in the yard.
+   COLOUR and TYPE: slate ink on white, tag yellow accent, red for pass; Barlow Condensed + Barlow. */
+:root{color-scheme:light dark;
+--bg:#ffffff;--panel:#f3f4f5;--line:#d9dcdf;--ink:#1b1e21;--mute:#5d646b;
+--tag:#f2c200;--tagInk:#1b1e21;--red:#c2271b;--green:#1d7a46;--blue:#1f5fbf}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#15171a;--panel:#1f2226;--line:#33373c;--ink:#eceef0;--mute:#9aa2aa;--red:#ff6a5c;--green:#4cc07f;--blue:#7aa9ff}}
+:root[data-theme=dark]{color-scheme:dark;--bg:#15171a;--panel:#1f2226;--line:#33373c;--ink:#eceef0;--mute:#9aa2aa;--red:#ff6a5c;--green:#4cc07f;--blue:#7aa9ff}
+:root[data-theme=light]{color-scheme:light}
+*{box-sizing:border-box;min-width:0}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Barlow,system-ui,sans-serif;overflow-x:clip;-webkit-tap-highlight-color:transparent}
+h1,h2,h3,.cond{font-family:"Barlow Condensed",Barlow,sans-serif;font-weight:700;line-height:1.05;margin:0}
+h1{font-size:clamp(32px,6vw,44px)}h2{font-size:26px}
+.band{padding:calc(clamp(18px,3vw,36px) + env(safe-area-inset-top)) max(4vw,16px,env(safe-area-inset-right)) 110px max(4vw,16px,env(safe-area-inset-left));max-width:1240px;margin:0 auto}
+button,select,input,textarea{font:inherit;font-size:16px;color:inherit}
+button{cursor:pointer;min-height:44px;border-radius:8px;border:1px solid var(--line);background:var(--bg);padding:0 14px}
+button:disabled{opacity:.55;cursor:default}
+a{color:var(--blue)}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+.pri{background:var(--tag);color:var(--tagInk);border-color:var(--tag);font-weight:600}
+.danger{color:var(--red);border-color:var(--red)}
+input,select,textarea{width:100%;min-height:44px;border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:8px 10px}
+textarea{min-height:120px;resize:vertical}
+label{display:block;font-size:13px;color:var(--mute);font-weight:600;margin-bottom:4px}
+.top{display:flex;flex-wrap:wrap;gap:12px;align-items:end;justify-content:space-between}
+.sub{color:var(--mute);margin:6px 0 0}
+.acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;vertical-align:1px;background:var(--mute)}
+.dot.ok{background:var(--green)}.dot.wait{background:var(--tag)}.dot.bad{background:var(--red)}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:14px 0 4px;scrollbar-width:none}
+.chip{flex:none;border-radius:999px;padding:0 16px;white-space:nowrap}
+.chip[aria-pressed=true]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-top:12px}
+.stats div{background:var(--panel);padding:10px 12px}.stats b{display:block;font:700 clamp(20px,4vw,28px)/1.1 "Barlow Condensed",sans-serif;white-space:nowrap}
+.stats span{font-size:13px;color:var(--mute)}
+.bar{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.bar>*{flex:1 1 150px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px;margin-top:16px}
+.card{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--bg);display:flex;flex-direction:column;cursor:pointer;position:relative}
+.card .ph{aspect-ratio:4/3;background:var(--panel);display:grid;place-items:center;color:var(--mute);font-size:14px}
+.card .ph img{width:100%;height:100%;object-fit:cover;display:block}
+.tagstrip{background:var(--tag);color:var(--tagInk);padding:6px 12px;display:flex;justify-content:space-between;gap:8px;font:700 15px/1.3 "Barlow Condensed",sans-serif}
+.card .bd{padding:10px 12px 12px;display:grid;gap:4px}
+.card h3{font-size:22px}
+.meta{font-size:14px;color:var(--mute)}
+.nums{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:15px}.nums b{white-space:nowrap}
+.pill{font-size:13px;font-weight:600;border-radius:999px;padding:2px 10px;border:1px solid currentColor;white-space:nowrap}
+.s-considering{color:var(--mute)}.s-shortlist{color:var(--blue)}.s-buy{color:var(--green)}.s-pass{color:var(--red)}.s-purchased{color:var(--ink)}
+.cmp{position:absolute;top:8px;right:8px;width:44px;height:44px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;border:0;font-size:18px;padding:0}
+.cmp[aria-pressed=true]{background:var(--tag);color:var(--tagInk)}
+.stars{color:var(--tag);letter-spacing:1px;-webkit-text-stroke:.5px #8a6d00}
+.empty{border:2px dashed var(--line);border-radius:12px;padding:32px;text-align:center;color:var(--mute);margin-top:16px}
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;z-index:10}
+.sheet.on{display:block}
+.sheet>.in{position:absolute;inset:0 0 0 auto;width:min(760px,100%);background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch;padding:calc(16px + env(safe-area-inset-top)) max(3vw,16px) calc(120px + env(safe-area-inset-bottom))}
+.sheethead{display:flex;justify-content:space-between;align-items:center;gap:10px;position:sticky;top:calc(-16px - env(safe-area-inset-top));background:var(--bg);padding:12px 0;z-index:2;border-bottom:1px solid var(--line)}
+.fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px}.full{grid-column:1/-1}
+.three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.calc{background:var(--panel);border-radius:10px;padding:12px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.calc b{display:block;font:700 22px/1.1 "Barlow Condensed",sans-serif;white-space:nowrap}.calc span{font-size:13px;color:var(--mute)}
+.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px}
+.photos figure{margin:0;position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;background:var(--panel)}
+.photos img{width:100%;height:100%;object-fit:cover;display:block;cursor:zoom-in}
+.photos .x{position:absolute;bottom:4px;display:flex;gap:4px;left:4px;right:4px;justify-content:space-between}
+.photos .x button{min-height:34px;padding:0 8px;background:rgba(0,0,0,.6);color:#fff;border:0;font-size:13px}
+.addph{display:grid;place-items:center;aspect-ratio:1;border:2px dashed var(--line);border-radius:8px;color:var(--mute);cursor:pointer;text-align:center;font-size:14px;padding:6px}
+.seg{display:flex;flex-wrap:wrap;gap:6px}.seg button{flex:1 1 auto}.seg button[aria-pressed=true]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.defects{display:flex;flex-wrap:wrap;gap:6px}.defects button{border-radius:999px;font-size:15px}
+.defects button[aria-pressed=true]{background:var(--red);color:#fff;border-color:var(--red)}
+.light{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;z-index:20;place-items:center}
+.light.on{display:grid}.light img{max-width:100vw;max-height:100vh;object-fit:contain}
+.light button{position:absolute;top:calc(12px + env(safe-area-inset-top));right:12px;background:#000;color:#fff}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;z-index:30;display:none;max-width:90vw;align-items:center;gap:12px}
+.toast button{min-height:36px;background:var(--tag);color:var(--tagInk);border:0;font-weight:600}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:15px}th,td{border-bottom:1px solid var(--line);padding:8px;text-align:left;vertical-align:top}
+th{font-size:13px;color:var(--mute);width:130px}td img{width:150px;aspect-ratio:4/3;object-fit:cover;border-radius:6px}
+.note{font-size:13px;color:var(--mute)}
+.kv{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 16px;margin:16px 0;font-size:15px}.kv dt{color:var(--mute)}.kv dd{margin:0;overflow-wrap:anywhere}
+code{font-size:13px;background:var(--panel);padding:2px 6px;border-radius:4px;overflow-wrap:anywhere}
+.fab{position:fixed;right:max(16px,env(safe-area-inset-right));bottom:calc(16px + env(safe-area-inset-bottom));z-index:5;min-height:56px;padding:0 22px;border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,.25);font-size:18px}
+@media(max-width:600px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.fields{grid-template-columns:minmax(0,1fr)}.calc{grid-template-columns:repeat(2,minmax(0,1fr))}.grid{grid-template-columns:minmax(0,1fr)}}
+@media(prefers-reduced-motion:no-preference){.sheet>.in{animation:sl .22s ease-out}@keyframes sl{from{transform:translateX(40px);opacity:.6}}}
+</style>
+</head>
+<body>
+<main class="band">
+  <div class="top">
+    <div><h1>Bundle Book</h1><p class="sub" id="status">Opening your notebook…</p></div>
+    <div class="acts">
+      <button id="tripBtn">Trips</button><button id="csvBtn">Copy CSV</button>
+      <button id="driveBtn"><span class="dot" id="driveDot"></span><span id="driveLbl">Drive</span></button>
+      <button id="instBtn" style="display:none">Install</button>
+    </div>
+  </div>
+  <div class="chips" id="trips" role="toolbar" aria-label="Trip"></div>
+  <div class="stats" id="stats"></div>
+  <div class="bar">
+    <input id="q" type="search" placeholder="Search material, supplier, bundle #" aria-label="Search">
+    <select id="fStatus" aria-label="Status"><option value="">All statuses</option></select>
+    <select id="sort" aria-label="Sort">
+      <option value="new">Newest first</option><option value="quality">Best quality</option>
+      <option value="cheap">Lowest $/sq ft</option><option value="total">Largest total $</option><option value="area">Most sq ft</option>
+    </select>
+  </div>
+  <div id="cmpBar" class="bar" style="display:none"><button id="cmpGo" class="pri"></button><button id="cmpClear">Clear compare</button></div>
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" style="display:none"></div>
+</main>
+<button class="pri fab" id="newBtn">+ Bundle</button>
+
+<div class="sheet" id="ed"><div class="in" role="dialog" aria-modal="true" aria-labelledby="edT">
+  <div class="sheethead"><h2 id="edT">Bundle</h2><div style="display:flex;gap:8px"><button id="edClose">Cancel</button><button class="pri" id="edSave">Save</button></div></div>
+  <div class="fields">
+    <div class="full"><label>Photos (first one is the cover)</label><div class="photos" id="phs"></div>
+      <input type="file" id="file" accept="image/*" multiple hidden></div>
+    <div><label for="f_material">Material / color name</label><input id="f_material" placeholder="Taj Mahal"></div>
+    <div><label for="f_type">Stone type</label><select id="f_type"></select></div>
+    <div><label for="f_supplier">Supplier / quarry</label><input id="f_supplier"></div>
+    <div><label for="f_location">Yard / city</label><input id="f_location" placeholder="Cachoeiro, ES"></div>
+    <div><label for="f_bundle">Bundle #</label><input id="f_bundle"></div>
+    <div><label for="f_block">Block #</label><input id="f_block"></div>
+    <div><label for="f_finish">Finish</label><select id="f_finish"></select></div>
+    <div><label for="f_thick">Thickness</label><select id="f_thick"></select></div>
+    <div class="full"><label>Slab size and count</label>
+      <div class="three"><input id="f_len" inputmode="decimal" placeholder="Length" aria-label="Length"><input id="f_wid" inputmode="decimal" placeholder="Width" aria-label="Width"><input id="f_slabs" inputmode="numeric" placeholder="Slabs" aria-label="Slab count"></div>
+      <div class="seg" id="u_dim" style="margin-top:8px"></div></div>
+    <div class="full"><label>Price</label>
+      <div class="three"><input id="f_price" inputmode="decimal" placeholder="Price" aria-label="Price"><select id="f_cur" aria-label="Currency"></select><select id="f_pmode" aria-label="Price per"></select></div></div>
+    <div class="full calc" id="calc"></div>
+    <div class="full"><label>Overall quality</label><div class="seg" id="u_q"></div></div>
+    <div class="full"><label>Defects / watch-outs</label><div class="defects" id="u_def"></div></div>
+    <div class="full"><label for="f_notes">Notes</label><textarea id="f_notes" placeholder="Movement, consistency across the bundle, resin, mesh, what the inspector said…"></textarea>
+      <button id="mic" style="display:none;margin-top:8px">🎙 Dictate</button></div>
+    <div class="full"><label>Decision</label><div class="seg" id="u_st"></div></div>
+    <div class="full"><label for="f_trip">Trip</label><select id="f_trip"></select></div>
+    <div class="full" style="margin-top:12px"><button class="danger" id="edDel">Delete bundle</button></div>
+  </div>
+</div></div>
+
+<div class="sheet" id="tp"><div class="in" role="dialog" aria-modal="true" aria-labelledby="tpT">
+  <div class="sheethead"><h2 id="tpT">Trips</h2><button id="tpClose">Done</button></div>
+  <p class="note">Each trip sets its currency and the exchange rate you're using, so every bundle converts to USD per sq ft. Update the rate when it moves; totals recalculate.</p>
+  <div id="tpList"></div>
+  <h3 style="margin-top:20px">Add or edit a trip</h3>
+  <div class="fields">
+    <div class="full"><label for="t_name">Trip name</label><input id="t_name" placeholder="Brazil — March 2027"></div>
+    <div><label for="t_cur">Currency</label><select id="t_cur"></select></div>
+    <div><label for="t_rate">1 unit = how many USD</label><input id="t_rate" inputmode="decimal" placeholder="e.g. 1.08 for EUR"></div>
+    <div><label for="t_dim">Default size unit</label><select id="t_dim"><option value="cm">cm</option><option value="in">inches</option></select></div>
+    <div><label for="t_pmode">Default price per</label><select id="t_pmode"></select></div>
+    <div class="full" style="display:flex;gap:8px"><button class="pri" id="tSave">Save trip</button><button id="tNew">Clear form</button></div>
+  </div>
+</div></div>
+
+<div class="sheet" id="cp"><div class="in" role="dialog" aria-modal="true" aria-labelledby="cpT">
+  <div class="sheethead"><h2 id="cpT">Compare</h2><button id="cpClose">Done</button></div>
+  <div class="scroll" id="cpBody"></div>
+</div></div>
+
+<div class="sheet" id="dv"><div class="in" role="dialog" aria-modal="true" aria-labelledby="dvT">
+  <div class="sheethead"><h2 id="dvT">Google Drive</h2><button id="dvClose">Done</button></div>
+  <div id="dvBody"></div>
+</div></div>
+
+<div class="sheet" id="cf"><div class="in" role="alertdialog" aria-modal="true" style="width:min(420px,100%);height:auto;inset:auto 0 0 auto;padding-bottom:calc(24px + env(safe-area-inset-bottom))">
+  <h2 id="cfT" style="margin-top:12px"></h2><p class="sub" id="cfM"></p>
+  <div style="display:flex;gap:8px;margin-top:16px"><button id="cfNo">Keep</button><button class="danger" id="cfYes">Delete</button></div>
+</div></div>
+
+<div class="light" id="lb"><img id="lbImg" alt="Bundle photo"><button id="lbX">Close</button></div>
+<div class="toast" id="toast" role="status" aria-live="polite"><span id="toastMsg"></span><button id="toastAct" style="display:none"></button></div>
+
+<script src="config.js"></script>
+<script src="store.js"></script>
+<script src="drive.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
