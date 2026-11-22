@@ -97,6 +97,8 @@ label.check input{width:22px;min-height:22px;height:22px;margin:0;accent-color:v
 table{border-collapse:collapse;width:100%;font-size:15px}th,td{border-bottom:1px solid var(--line);padding:8px;text-align:left;vertical-align:top}
 th{font-size:13px;color:var(--mute);width:130px}td img{width:150px;aspect-ratio:4/3;object-fit:cover;border-radius:6px}
 .note{font-size:13px;color:var(--mute)}
+.conv{margin:8px 0 0;padding:6px 10px;border-left:3px solid var(--tag);background:var(--panel);border-radius:0 6px 6px 0;font-size:15px}
+.conv b{font-weight:600}
 .kv{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 16px;margin:16px 0;font-size:15px}.kv dt{color:var(--mute)}.kv dd{margin:0;overflow-wrap:anywhere}
 code{font-size:13px;background:var(--panel);padding:2px 6px;border-radius:4px;overflow-wrap:anywhere}
 .fab{position:fixed;right:max(16px,env(safe-area-inset-right));bottom:calc(16px + env(safe-area-inset-bottom));z-index:5;min-height:56px;padding:0 22px;border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,.25);font-size:18px}
@@ -145,9 +147,11 @@ code{font-size:13px;background:var(--panel);padding:2px 6px;border-radius:4px;ov
     <div><label for="f_thick">Thickness</label><select id="f_thick"></select></div>
     <div class="full"><label>Slab size and count</label>
       <div class="three"><input id="f_len" inputmode="decimal" placeholder="Length" aria-label="Length"><input id="f_wid" inputmode="decimal" placeholder="Width" aria-label="Width"><input id="f_slabs" inputmode="numeric" placeholder="Slabs" aria-label="Slab count"></div>
-      <div class="seg" id="u_dim" style="margin-top:8px"></div></div>
+      <div class="seg" id="u_dim" style="margin-top:8px"></div>
+      <p class="conv" id="convSize" hidden></p></div>
     <div class="full"><label>Price</label>
-      <div class="three"><input id="f_price" inputmode="decimal" placeholder="Price" aria-label="Price"><select id="f_cur" aria-label="Currency"></select><select id="f_pmode" aria-label="Price per"></select></div></div>
+      <div class="three"><input id="f_price" inputmode="decimal" placeholder="Price" aria-label="Price"><select id="f_cur" aria-label="Currency"></select><select id="f_pmode" aria-label="Price per"></select></div>
+      <p class="conv" id="convPrice" hidden></p></div>
     <div class="full calc" id="calc"></div>
     <div class="full"><label>Overall quality</label><div class="seg" id="u_q"></div></div>
     <div class="full"><label>Defects / watch-outs</label><div class="defects" id="u_def"></div></div>

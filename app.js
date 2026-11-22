@@ -162,8 +162,33 @@ function edRender() {
   hydrate($('phs'));
   edCalc();
 }
+// Live conversions shown under the size and price inputs: cm → inches, m² → sq ft, foreign currency → USD.
+const f1 = n => (+n.toFixed(1)).toLocaleString('en-US');
+const money = n => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function convHints(c) {
+  const L = num(edit.len), W = num(edit.wid), p = num(edit.price);
+  let size = '';
+  if (edit.dim === 'cm' && (L || W)) {
+    size = L && W ? `<b>${f1(L / 2.54)} × ${f1(W / 2.54)} in</b> per slab · ${(L * W / 1e4).toFixed(2)} m² = <b>${f1(L * W / 1e4 * SQFT)} sq ft</b> each`
+      : `<b>${f1((L || W) / 2.54)} in</b>`;
+  }
+  let price = '';
+  if (p && (edit.cur !== 'USD' || edit.pmode === 'm2')) {
+    if (!c.rate) price = `Set a ${esc(edit.cur)}→USD rate on the trip to see this in USD.`;
+    else {
+      const usdEach = p * c.rate, inUsd = edit.cur !== 'USD';
+      price = edit.pmode === 'm2'
+        ? (inUsd ? `<b>${money(usdEach)} per m²</b> · ` : '') + `<b>${money(usdEach / SQFT)} per sq ft</b>`
+        : `<b>${money(usdEach)} ${esc(PM[edit.pmode] || '')}</b>`;
+      if (inUsd) price = '≈ ' + price + ` <span class="note">at ${fmtRate(c.rate)}</span>`;
+    }
+  }
+  $('convSize').innerHTML = size; $('convSize').hidden = !size;
+  $('convPrice').innerHTML = price; $('convPrice').hidden = !price;
+}
 function edCalc() {
   readForm(); const c = calc(edit), t = tripOf(edit.tripId);
+  convHints(c);
   $('calc').innerHTML = `<div><b>${c.m2 ? c.m2.toFixed(2) : '—'}</b><span>m² total</span></div><div><b>${fmt(c.sqft)}</b><span>sq ft total</span></div>
    <div><b>${usd2(c.psf)}</b><span>USD per sq ft</span></div><div><b>${c.local ? Math.round(c.local).toLocaleString('en-US') + ' ' + esc(edit.cur) : '—'}</b><span>bundle cost</span></div>
    <div><b>${usd(c.total)}</b><span>bundle in USD</span></div><div><b>${esc(edit.cur === 'USD' ? '—' : fmtRate(c.rate) || 'set rate')}</b><span>${esc(edit.cur)}→USD rate${edit.cur !== 'USD' && (edit.cur !== t.cur || autoRate(t)) && meta.fx ? ' · live ' + esc(fxWhen()) : ''}</span></div>`;
