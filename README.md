@@ -34,7 +34,7 @@ To build your own views, formulas or formatting:
 1. In the app, tap **Drive**, then **Copy link** next to the trip.
 2. In your own Google Sheet, enter:
    ```
-   =IMPORTRANGE("paste-the-link-here", "A1:Z")
+   =IMPORTRANGE("paste-the-link-here", "A1:AZ")
    ```
 3. Click **Allow access** the first time.
 

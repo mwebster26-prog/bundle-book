@@ -318,12 +318,14 @@ function compare() {
   hydrate($('cpBody'));
   $('cp').classList.add('on');
 }
+const SHEET_FORMAT = 2;   // 1: locked sheets · 2: + Length (in), Width (in)
+const toIn = (v, dim) => num(v) ? +(dim === 'cm' ? num(v) / 2.54 : num(v)).toFixed(1) : '';
 function csvText(list) {
-  const h = ['Trip', 'Material', 'Type', 'Supplier', 'Location', 'Bundle', 'Block', 'Finish', 'Thickness', 'Slabs', 'Length', 'Width', 'Unit', 'Sq ft', 'Price', 'Currency', 'Price per', 'Bundle USD', 'USD per sq ft', 'Quality', 'Defects', 'Status', 'Notes', 'Photos in Drive', 'Photo count', 'Updated'];
+  const h = ['Trip', 'Material', 'Type', 'Supplier', 'Location', 'Bundle', 'Block', 'Finish', 'Thickness', 'Slabs', 'Length', 'Width', 'Unit', 'Length (in)', 'Width (in)', 'Sq ft', 'Price', 'Currency', 'Price per', 'Bundle USD', 'USD per sq ft', 'Quality', 'Defects', 'Status', 'Notes', 'Photos in Drive', 'Photo count', 'Updated'];
   const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const rows = list.map(b => {
     const c = calc(b), f = syncMeta.get(b.id)?.folder;
-    return [tripOf(b.tripId).name, b.material, b.type, b.supplier, b.location, b.bundle, b.block, b.finish, b.thick, b.slabs, b.len, b.wid, b.dim, c.sqft.toFixed(1), b.price, b.cur, PM[b.pmode], c.total.toFixed(2), c.psf.toFixed(2), b.quality, (b.defects || []).join('; '), ST[b.status], b.notes, f ? 'https://drive.google.com/drive/folders/' + f : '', (b.photos || []).length, b.updated ? new Date(b.updated).toISOString().slice(0, 16).replace('T', ' ') : ''].map(q).join(',');
+    return [tripOf(b.tripId).name, b.material, b.type, b.supplier, b.location, b.bundle, b.block, b.finish, b.thick, b.slabs, b.len, b.wid, b.dim, toIn(b.len, b.dim), toIn(b.wid, b.dim), c.sqft.toFixed(1), b.price, b.cur, PM[b.pmode], c.total.toFixed(2), c.psf.toFixed(2), b.quality, (b.defects || []).join('; '), ST[b.status], b.notes, f ? 'https://drive.google.com/drive/folders/' + f : '', (b.photos || []).length, b.updated ? new Date(b.updated).toISOString().slice(0, 16).replace('T', ' ') : ''].map(q).join(',');
   });
   return { text: [h.map(q).join(','), ...rows].join('\n'), n: rows.length };
 }
@@ -517,7 +519,7 @@ async function dvRender() {
      ${ent ? `<button data-copy="${esc(ent.url)}" style="min-height:34px">Copy link</button>` : ''}</div>`).join('') : '<p class="note">Each trip gets its own sheet as soon as you create it. Day-to-day gets one when it has a bundle.</p>'}
    ${fails.length ? `<h3 style="margin-top:16px">Couldn't send</h3><ul class="note">${fails.map(j => `<li>${esc(jobLabel(j))}: ${esc(j.err)} (${j.tries} tr${j.tries === 1 ? 'y' : 'ies'})</li>`).join('')}</ul>` : ''}
    ${Object.keys(meta.sheets.unlocked || {}).length ? `<h3 style="margin-top:16px">Not locked</h3><ul class="note">${Object.values(meta.sheets.unlocked).map(u => `<li>${esc(u.name)}: Drive refused the lock (${esc(u.err)}). The next sync tries again.</li>`).join('')}</ul>` : ''}
-   <p class="note" style="margin-top:16px">Each trip has its own Google Sheet in Bundle Book › Sheets, replaced with that trip's bundles on every sync. The sheets are locked, so they open view-only and changes are made here in the app. A sheet's link never changes, even if you rename the trip, so you can pull it into your own spreadsheet with <code>=IMPORTRANGE("link", "A1:Z")</code>. A dated copy of all trips is kept in Sheets › Daily copies. Photos go to Photos › trip › bundle. Deleting a bundle here doesn't delete its copies in Drive.</p>
+   <p class="note" style="margin-top:16px">Each trip has its own Google Sheet in Bundle Book › Sheets, replaced with that trip's bundles on every sync. The sheets are locked, so they open view-only and changes are made here in the app. A sheet's link never changes, even if you rename the trip, so you can pull it into your own spreadsheet with <code>=IMPORTRANGE("link", "A1:AZ")</code>. A dated copy of all trips is kept in Sheets › Daily copies. Photos go to Photos › trip › bundle. Deleting a bundle here doesn't delete its copies in Drive.</p>
    <p class="note">Google sign-in lasts about an hour. After that, anything new waits here until you tap Reconnect.</p>`;
   const go = $('dvGo'); if (go) go.onclick = () => tok ? runSync() : Drive.connect();
   $('dvBody').querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast('Sheet link copied'); } catch { toast('Copy was blocked by the browser.'); } });
@@ -644,11 +646,12 @@ if ('serviceWorker' in navigator) {
     // Every trip gets its own sheet: queue one for any trip (or a non-empty Day-to-day) that doesn't have one yet.
     const want = [...trips.map(t => t.id), ...(bundles.some(b => !b.tripId) ? [''] : [])];
     for (const tid of want) if (!meta.sheets.trips[tripKey(tid)] && !queue.some(j => j.id === 'sheet:' + tripKey(tid))) await enqueueTripSheet(tid);
-    // Sheets made before locking existed: rewrite them once so they get locked.
-    if (!meta.sheets.lockV) {
+    // Sheets written by an older version (different columns, or before locking): rewrite them once.
+    // Bump SHEET_FORMAT whenever the sheet columns change.
+    if ((meta.sheets.format || 0) < SHEET_FORMAT) {
       for (const key of Object.keys(meta.sheets.trips)) await enqueueTripSheet(key === 'daily' ? '' : key);
       if (meta.sheets.byDay[today()]) await enqueueSnapshot();
-      meta.sheets.lockV = 1; await DB.put('meta', meta.sheets);
+      meta.sheets.format = SHEET_FORMAT; await DB.put('meta', meta.sheets);
     }
   } catch (e) {
     $('status').textContent = 'This browser won’t let Bundle Book store data (' + (e?.message || e) + '). Private browsing can cause this.';
