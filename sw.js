@@ -1,6 +1,6 @@
 // Bundle Book service worker: serves the app from cache so it opens with no signal.
 // Bump VERSION whenever you deploy changed files, so phones pick up the update.
-const VERSION = 'bb-v3';
+const VERSION = 'bb-v4';
 const FONTS = 'bb-fonts';
 const SHELL = [
   './', 'index.html', 'app.js', 'store.js', 'drive.js', 'config.js', 'manifest.webmanifest',

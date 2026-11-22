@@ -96,6 +96,13 @@ window.Drive = (() => {
     return r.files?.[0]?.id || null;
   }
 
+  // Finds a file the app tagged with appProperties {key: value} inside a folder.
+  async function findByProp(key, value, parent) {
+    const q = `appProperties has { key='${qv(key)}' and value='${qv(value)}' } and '${qv(parent)}' in parents and trashed = false`;
+    const r = await g(API + '/files?' + new URLSearchParams({ q, fields: 'files(id)', pageSize: '1', spaces: 'drive' }));
+    return r.files?.[0]?.id || null;
+  }
+
   // True if the file/folder still exists and isn't in the bin.
   async function alive(id) {
     try { return !(await g(API + '/files/' + encodeURIComponent(id) + '?fields=id,trashed')).trashed; }
@@ -113,5 +120,5 @@ window.Drive = (() => {
     return g(url, { method: fileId ? 'PATCH' : 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + b }, body });
   }
 
-  return { configured, token, connect, disconnect, handleRedirect, whoami, email, ensureFolder, findFile, alive, upload, redirectUri, SHEET };
+  return { configured, token, connect, disconnect, handleRedirect, whoami, email, ensureFolder, findFile, findByProp, alive, upload, redirectUri, SHEET };
 })();

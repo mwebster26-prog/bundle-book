@@ -1,26 +1,35 @@
 # Bundle Book
 
-An installable, offline-first notebook for buying stone. Log bundles, photos, sizes, prices and decisions at the yard. It all saves on the phone first. When there's a connection, photos and a dated Google Sheet sync to your Google Drive:
+An installable, offline-first notebook for buying stone. Log bundles, photos, sizes, prices and decisions at the yard. It all saves on the phone first. When there's a connection, photos and one Google Sheet per trip sync to your Google Drive:
 
 ```
 My Drive
 └── Bundle Book
-    ├── Bundle Book — Live   (Google Sheet, always current, same link forever)
     ├── Photos
     │   └── <Trip name>
     │       └── <Bundle #> — <Material> — <id>
     │           └── 4471_1_xxxxxx.jpg …
     └── Sheets
-        └── Bundle Book — 2026-11-21   (dated copy, one per day)
+        ├── Bundle Book — Brazil — March 2027   (one Google Sheet per trip)
+        ├── Bundle Book — Day-to-day
+        └── Daily copies
+            └── All trips — 2026-11-22   (dated copy of every trip, one per day)
 ```
 
-### Using the live sheet in your own spreadsheet
+### Trip sheets
 
-"Bundle Book — Live" is replaced with every bundle on each sync. Its address never changes. Don't type into it, because each sync overwrites it.
+- **Creating a trip** creates its sheet on the next sync. It starts with just the column headings.
+- **Saving, moving or deleting a bundle** rewrites only the sheet for that bundle's trip. When a bundle moves between trips, both sheets are rewritten.
+- **Renaming a trip** renames its sheet. The link stays the same, because each sheet is tagged with its trip's internal id.
+- **Day-to-day** gets a sheet once it has a bundle.
+- **A new phone** finds the existing trip sheets rather than making copies.
+- **Don't type into a trip sheet.** Each sync overwrites it.
+
+### Using a trip sheet in your own spreadsheet
 
 To build your own views, formulas or formatting:
 
-1. In the app, tap **Drive**, then **Copy link** next to the live sheet.
+1. In the app, tap **Drive**, then **Copy link** next to the trip.
 2. In your own Google Sheet, enter:
    ```
    =IMPORTRANGE("paste-the-link-here", "A1:Z")
@@ -33,7 +42,7 @@ Your sheet then updates on its own whenever the app syncs.
 
 - **Storage:** bundles, trips and full photos live in the browser's IndexedDB on the device. On the first save the app asks the browser for persistent storage, so the OS is less likely to clear it.
 - **Offline:** a service worker (`sw.js`) caches the app, so it opens with no signal. Google Fonts are cached the first time they load.
-- **Sync queue:** each save queues the bundle's new photos plus one "rewrite the sheet" job. The queue runs:
+- **Sync queue:** each save queues the bundle's new photos, a rewrite of its trip's sheet, and a rewrite of today's all-trips copy. Repeated edits before a sync still mean one upload per sheet. The queue runs:
   - when you save
   - when the connection comes back
   - when you reopen the app
@@ -41,7 +50,7 @@ Your sheet then updates on its own whenever the app syncs.
   - when you tap **Drive › Sync now**
 
   Failed jobs stay queued, with the error shown in the Drive panel.
-- **Sheets:** each sync replaces the content of the single live sheet, keeping the same file. It also rewrites that day's dated copy. Earlier days' copies are left as snapshots.
+- **Sheets:** each trip's sheet keeps the same file, and its content is replaced in place. The daily all-trips copy is rewritten through the day, and earlier days' copies are left as snapshots.
 - **Google sign-in:** the app redirects to Google's sign-in page and back, using your OAuth client and only the `drive.file` scope. That scope lets the app see only the files and folders it created, nothing else in your Drive. Pop-ups aren't used because they fail inside an installed iPhone app.
   - Google gives a browser-only app a token for about an hour and no refresh token.
   - After the hour, new items wait on the phone until you tap **Reconnect**. That's usually a single tap, because Google remembers your consent.

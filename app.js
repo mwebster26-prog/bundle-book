@@ -153,7 +153,9 @@ async function save() {
     await DB.put('bundles', body);
     bundles = old ? bundles.map(b => b.id === id ? body : b) : [...bundles, body];
     for (const p of old?.photos || []) if (!body.photos.includes(p)) await dropPhoto(p);
-    await enqueuePhotos(body); await enqueueSheet();
+    await enqueuePhotos(body); await enqueueTripSheet(body.tripId);
+    if (old && (old.tripId || '') !== (body.tripId || '')) await enqueueTripSheet(old.tripId);   // moved out of a trip
+    await enqueueSnapshot();
     await closeEd(true); toast('Saved on this device'); askPersist(); render(); setSync(); kick();
   } catch (e) {
     toast(e?.name === 'QuotaExceededError' ? 'This device is out of storage space. Delete old bundles or photos, then save again.' : 'Save failed: ' + (e?.message || e) + '. Your entry is still open.');
@@ -195,7 +197,7 @@ async function saveTrip() {
   try {
     await DB.put('trips', t);
     trips = (old ? trips.map(x => x.id === id ? t : x) : [...trips, t]).sort((a, b) => (a.created || 0) - (b.created || 0));
-    await enqueueSheet(); tForm(); tpRender(); render(); setSync(); kick(); toast('Trip saved');
+    await enqueueTripSheet(id); await enqueueSnapshot(); tForm(); tpRender(); render(); setSync(); kick(); toast('Trip saved');
   } catch (e) { toast('Trip save failed: ' + (e?.message || e)); }
 }
 
@@ -235,10 +237,12 @@ async function enqueuePhotos(b) {
     await DB.put('queue', j); queue.push(j);
   }
 }
-async function enqueueSheet() {
-  const j = { id: 'sheet', kind: 'sheet', at: Date.now(), tries: 0 };
-  await DB.put('queue', j); queue = queue.filter(x => x.id !== 'sheet').concat(j);
-}
+// Sheet jobs: one per trip ("sheet:<tripKey>") plus one for the all-trips daily copy ("snapshot").
+// Re-queuing replaces the waiting job, so a burst of edits still means one upload.
+const tripKey = tid => tid || 'daily';
+async function putJob(j) { await DB.put('queue', j); queue = queue.filter(x => x.id !== j.id).concat(j); }
+const enqueueTripSheet = tid => putJob({ id: 'sheet:' + tripKey(tid), kind: 'tripSheet', trip: tripKey(tid), at: Date.now(), tries: 0 });
+const enqueueSnapshot = () => putJob({ id: 'snapshot', kind: 'snapshot', at: Date.now(), tries: 0 });
 async function dropJob(id) { await DB.del('queue', id); queue = queue.filter(j => j.id !== id); }
 async function dropPhoto(p) {
   await DB.del('photos', p).catch(() => {}); await dropJob('p:' + p);
@@ -274,31 +278,42 @@ async function syncPhoto(j, ctx) {
   await putSyncMeta(b.id, sm);
 }
 const sheetUrl = r => r.webViewLink || `https://docs.google.com/spreadsheets/d/${r.id}/edit`;
-const LIVE_NAME = 'Bundle Book — Live';
-async function syncSheet(ctx) {
-  const day = today(), name = `Bundle Book — ${day}`;
-  const list = [...bundles].sort((a, b) => tripOf(a.tripId).name.localeCompare(tripOf(b.tripId).name) || (a.created || 0) - (b.created || 0));
-  const blob = new Blob([csvText(list).text], { type: 'text/csv' });
-  const sh = meta.sheets;
+const byCreated = (a, b) => (a.created || 0) - (b.created || 0);
+const csvBlob = list => new Blob([csvText(list).text], { type: 'text/csv' });
+const tripSheetName = key => `Bundle Book — ${tripOf(key === 'daily' ? '' : key).name}`;
 
-  // The live sheet keeps the same file (and address) for good, so other sheets can IMPORTRANGE it.
-  // Its content is replaced in place; it's only re-created if it was deleted from Drive.
-  let live = null;
-  if (!sh.live?.id) {   // first run, or a new device: reuse an existing live sheet if there is one
-    const id = await Drive.findFile(LIVE_NAME, ctx.root, Drive.SHEET);
-    if (id) sh.live = { id, url: `https://docs.google.com/spreadsheets/d/${id}/edit` };
-  }
-  if (sh.live?.id && await Drive.alive(sh.live.id)) live = await Drive.upload({ name: LIVE_NAME }, blob, sh.live.id);
-  else live = await Drive.upload({ name: LIVE_NAME, parents: [ctx.root], mimeType: Drive.SHEET }, blob);
-  sh.live = { id: live.id, url: sheetUrl(live) };
+// One Google Sheet per trip, in Bundle Book › Sheets. Each keeps the same file (and link) for good;
+// its content is replaced in place and its name follows the trip's name. The file is tagged with the
+// trip's id (appProperties), so a renamed trip, or a new phone, still finds the same sheet.
+async function syncTripSheet(j, ctx) {
+  const key = j.trip, tid = key === 'daily' ? '' : key, sh = meta.sheets;
+  if (tid && !trips.some(t => t.id === tid)) return;   // trip no longer exists
+  const list = bundles.filter(b => (b.tripId || '') === tid).sort(byCreated);
+  let ent = sh.trips[key];
+  if (!tid && !list.length && !ent) return;             // no empty Day-to-day sheet until it has bundles
+  if (!ent?.id) { const id = await Drive.findByProp('bbTrip', key, ctx.sheets); if (id) ent = { id }; }
+  const name = tripSheetName(key), blob = csvBlob(list);
+  const r = ent?.id && await Drive.alive(ent.id)
+    ? await Drive.upload({ name }, blob, ent.id)
+    : await Drive.upload({ name, parents: [ctx.sheets], mimeType: Drive.SHEET, appProperties: { bbTrip: key } }, blob);
+  sh.trips[key] = { id: r.id, url: sheetUrl(r) };
   await DB.put('meta', sh);
+}
 
-  // Dated snapshot: one per day, rewritten through the day; earlier days are left alone.
+// Dated copy of every bundle across all trips, in Bundle Book › Sheets › Daily copies.
+// One per day, rewritten through the day; earlier days are left alone.
+async function syncSnapshot(ctx) {
+  const day = today(), name = `All trips — ${day}`, sh = meta.sheets;
+  const list = [...bundles].sort((a, b) => tripOf(a.tripId).name.localeCompare(tripOf(b.tripId).name) || byCreated(a, b));
+  const blob = csvBlob(list);
   let r = null; const ent = sh.byDay[day];
   if (ent?.id && await Drive.alive(ent.id)) {
     try { r = await Drive.upload({ name }, blob, ent.id); } catch (e) { if (e.code !== 'http') throw e; }
   }
-  if (!r) r = await Drive.upload({ name, parents: [ctx.sheets], mimeType: Drive.SHEET }, blob);
+  if (!r) {
+    ctx.daily ||= await Drive.ensureFolder('Daily copies', ctx.sheets);
+    r = await Drive.upload({ name, parents: [ctx.daily], mimeType: Drive.SHEET }, blob);
+  }
   sh.byDay[day] = { id: r.id, url: sheetUrl(r) };
   sh.last = { day, ...sh.byDay[day] };
   await DB.put('meta', sh);
@@ -306,7 +321,8 @@ async function syncSheet(ctx) {
 async function runSync() {
   if (syncing || !queue.length || !Drive.configured() || !navigator.onLine || !Drive.token()) { setSync(); return; }
   syncing = true; lastErr = ''; setSync();
-  const jobs = [...queue].sort((a, b) => (a.kind === 'sheet') - (b.kind === 'sheet') || a.at - b.at);
+  const rank = { photo: 0, tripSheet: 1, snapshot: 2 };   // photos first, so sheets can link their folders
+  const jobs = [...queue].sort((a, b) => (rank[a.kind] ?? 3) - (rank[b.kind] ?? 3) || a.at - b.at);
   try {
     const root = await Drive.ensureFolder('Bundle Book');
     const ctx = { root, photos: await Drive.ensureFolder('Photos', root), sheets: await Drive.ensureFolder('Sheets', root), trip: new Map(), checked: new Set() };
@@ -316,7 +332,9 @@ async function runSync() {
       const j = queue.find(x => x.id === j0.id && x.at === j0.at); if (!j) continue;   // removed or replaced meanwhile
       syncProg = `${++i}/${jobs.length}`; setSync();
       try {
-        if (j.kind === 'photo') await syncPhoto(j, ctx); else await syncSheet(ctx);
+        if (j.kind === 'photo') await syncPhoto(j, ctx);
+        else if (j.kind === 'tripSheet') await syncTripSheet(j, ctx);
+        else if (j.kind === 'snapshot') await syncSnapshot(ctx);
         if (queue.find(x => x.id === j.id)?.at === j.at) await dropJob(j.id);   // keep a newer sheet job queued during the run
       } catch (e) {
         if (e.code === 'auth' || e.code === 'offline') throw e;
@@ -333,10 +351,16 @@ async function runSync() {
   }
 }
 
+const waitCounts = () => {
+  const ph = queue.filter(j => j.kind === 'photo').length, sh = queue.filter(j => j.kind === 'tripSheet').length, snap = queue.some(j => j.kind === 'snapshot');
+  const parts = [ph ? `${ph} photo${ph === 1 ? '' : 's'}` : '', sh ? `${sh} trip sheet${sh === 1 ? '' : 's'}` : (snap ? 'the daily copy' : '')].filter(Boolean);
+  return { n: ph + sh + (snap && !sh ? 1 : 0), text: parts.join(' and ') };
+};
+const jobLabel = j => j.kind === 'photo' ? 'Photo for ' + (bundles.find(b => b.id === j.bundleId)?.material || 'a bundle')
+  : j.kind === 'tripSheet' ? 'Sheet for ' + tripOf(j.trip === 'daily' ? '' : j.trip).name : 'Daily copy';
+
 function setSync() {
-  const ph = queue.filter(j => j.kind === 'photo').length, sh = queue.some(j => j.kind === 'sheet');
-  const waiting = [ph ? `${ph} photo${ph === 1 ? '' : 's'}` : '', sh ? 'the sheet' : ''].filter(Boolean).join(' and ');
-  const n = ph + (sh ? 1 : 0);
+  const { n, text: waiting } = waitCounts();
   let s, lbl, dot;
   if (!Drive.configured()) { s = 'Saved on this device. Drive sync is off until the Google client ID is set.'; lbl = 'Drive'; dot = ''; }
   else if (syncing) { s = `Sending to Google Drive… ${syncProg}`; lbl = 'Syncing…'; dot = 'wait'; }
@@ -353,8 +377,9 @@ function setSync() {
 async function dvRender() {
   const conf = Drive.configured(), tok = !!Drive.token(), on = navigator.onLine;
   const fails = queue.filter(j => j.tries && j.err);
-  const ph = queue.filter(j => j.kind === 'photo').length, sh = queue.some(j => j.kind === 'sheet');
+  const wait = waitCounts().text;
   const last = meta.sheets.last, root = meta.sync.root;
+  const sheetRows = [DAILY, ...trips].map(t => ({ t, ent: meta.sheets.trips[tripKey(t.id)] })).filter(x => x.ent || x.t.id);
   let est = '';
   try {
     const e = await navigator.storage?.estimate?.(), p = await navigator.storage?.persisted?.();
@@ -369,18 +394,21 @@ async function dvRender() {
    </div>
    <dl class="kv">
      <dt>Account</dt><dd>${tok || Drive.email() ? esc(Drive.email() || 'Connected') + (tok ? '' : ' (sign-in expired)') : 'Not connected'}</dd>
-     <dt>Waiting</dt><dd>${ph || sh ? [ph ? ph + ' photo' + (ph === 1 ? '' : 's') : '', sh ? 'sheet update' : ''].filter(Boolean).join(', ') : 'Nothing'}</dd>
+     <dt>Waiting</dt><dd>${esc(wait || 'Nothing')}</dd>
      <dt>Last sync</dt><dd>${ago(meta.sync.last)}</dd>
      <dt>Drive folder</dt><dd>${root ? `<a href="https://drive.google.com/drive/folders/${esc(root)}" target="_blank" rel="noopener">Bundle Book</a> › Photos / Sheets` : 'Bundle Book › Photos / Sheets (made on first sync)'}</dd>
-     <dt>Live sheet</dt><dd>${meta.sheets.live ? `<a href="${esc(meta.sheets.live.url)}" target="_blank" rel="noopener">${LIVE_NAME}</a> <button id="dvCopy" style="min-height:34px;margin-left:6px">Copy link</button>` : 'Made on first sync'}</dd>
-     <dt>Today's copy</dt><dd>${last ? `<a href="${esc(last.url)}" target="_blank" rel="noopener">Bundle Book — ${esc(last.day)}</a>` : 'None yet'}</dd>
+     <dt>Today's copy</dt><dd>${last ? `<a href="${esc(last.url)}" target="_blank" rel="noopener">All trips — ${esc(last.day)}</a>` : 'None yet'}</dd>
      <dt>On this device</dt><dd>${esc(est || 'Unknown')}</dd>
    </dl>
-   ${fails.length ? `<h3>Couldn't send</h3><ul class="note">${fails.map(j => `<li>${esc(j.kind === 'sheet' ? 'Sheet' : 'Photo for ' + (bundles.find(b => b.id === j.bundleId)?.material || 'a bundle'))}: ${esc(j.err)} (${j.tries} tr${j.tries === 1 ? 'y' : 'ies'})</li>`).join('')}</ul>` : ''}
-   <p class="note">“${LIVE_NAME}” sits in the Bundle Book folder and is replaced with every bundle on each sync. Its link never changes, so you can pull it into your own spreadsheet with <code>=IMPORTRANGE("link", "A1:Z")</code>. Don't type into it; your edits would be overwritten. A dated copy is also kept in Sheets, one per day. Photos go to Photos › trip › bundle. Deleting a bundle here doesn't delete its copies in Drive.</p>
+   <h3>Trip sheets</h3>
+   ${sheetRows.length ? sheetRows.map(({ t, ent }) => `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:1px solid var(--line);padding:8px 0">
+     <div>${ent ? `<a href="${esc(ent.url)}" target="_blank" rel="noopener">${esc(t.name)}</a>` : `<b>${esc(t.name)}</b> <span class="note">· made on next sync</span>`}</div>
+     ${ent ? `<button data-copy="${esc(ent.url)}" style="min-height:34px">Copy link</button>` : ''}</div>`).join('') : '<p class="note">Each trip gets its own sheet as soon as you create it. Day-to-day gets one when it has a bundle.</p>'}
+   ${fails.length ? `<h3 style="margin-top:16px">Couldn't send</h3><ul class="note">${fails.map(j => `<li>${esc(jobLabel(j))}: ${esc(j.err)} (${j.tries} tr${j.tries === 1 ? 'y' : 'ies'})</li>`).join('')}</ul>` : ''}
+   <p class="note" style="margin-top:16px">Each trip has its own Google Sheet in Bundle Book › Sheets, replaced with that trip's bundles on every sync. A sheet's link never changes, even if you rename the trip, so you can pull it into your own spreadsheet with <code>=IMPORTRANGE("link", "A1:Z")</code>. Don't type into these sheets; your edits would be overwritten. A dated copy of all trips is kept in Sheets › Daily copies. Photos go to Photos › trip › bundle. Deleting a bundle here doesn't delete its copies in Drive.</p>
    <p class="note">Google sign-in lasts about an hour. After that, anything new waits here until you tap Reconnect.</p>`;
   const go = $('dvGo'); if (go) go.onclick = () => tok ? runSync() : Drive.connect();
-  const cp = $('dvCopy'); if (cp) cp.onclick = async () => { try { await navigator.clipboard.writeText(meta.sheets.live.url); toast('Live sheet link copied'); } catch { toast('Copy was blocked by the browser.'); } };
+  $('dvBody').querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast('Sheet link copied'); } catch { toast('Copy was blocked by the browser.'); } });
   const out = $('dvOut'); if (out) out.onclick = () => { Drive.disconnect(); setSync(); toast('Disconnected from Google Drive'); };
 }
 
@@ -449,7 +477,7 @@ $('edDel').onclick = () => confirmDel('Delete this bundle?', 'Its notes and phot
     for (const j of queue.filter(j => j.bundleId === b.id)) await dropJob(j.id);
     await DB.del('meta', 'b:' + b.id); syncMeta.delete(b.id);
     bundles = bundles.filter(x => x.id !== b.id); cmp.delete(b.id);
-    await enqueueSheet(); await closeEd(true); render(); setSync(); kick(); toast('Deleted');
+    await enqueueTripSheet(b.tripId); await enqueueSnapshot(); await closeEd(true); render(); setSync(); kick(); toast('Deleted');
   } catch (e) { toast('Delete failed: ' + (e?.message || e)); }
 });
 $('cfNo').onclick = () => $('cf').classList.remove('on'); $('cfYes').onclick = () => { $('cf').classList.remove('on'); cfCb && cfCb(); };
@@ -496,7 +524,12 @@ if ('serviceWorker' in navigator) {
     [bundles, trips, queue, all] = await Promise.all([DB.all('bundles'), DB.all('trips'), DB.all('queue'), DB.all('meta')]);
     trips.sort((a, b) => (a.created || 0) - (b.created || 0));
     for (const m of all) { if (m.id.startsWith('b:')) syncMeta.set(m.id.slice(2), m); else meta[m.id] = m; }
-    meta.sheets.byDay ||= {};
+    meta.sheets.byDay ||= {}; meta.sheets.trips ||= {};
+    // Older versions queued one 'sheet' job; replace it with the per-trip jobs below.
+    if (queue.some(j => j.kind === 'sheet')) { await dropJob('sheet'); await enqueueSnapshot(); }
+    // Every trip gets its own sheet: queue one for any trip (or a non-empty Day-to-day) that doesn't have one yet.
+    const want = [...trips.map(t => t.id), ...(bundles.some(b => !b.tripId) ? [''] : [])];
+    for (const tid of want) if (!meta.sheets.trips[tripKey(tid)] && !queue.some(j => j.id === 'sheet:' + tripKey(tid))) await enqueueTripSheet(tid);
   } catch (e) {
     $('status').textContent = 'This browser won’t let Bundle Book store data (' + (e?.message || e) + '). Private browsing can cause this.';
     return;
