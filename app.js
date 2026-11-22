@@ -318,7 +318,8 @@ function compare() {
   hydrate($('cpBody'));
   $('cp').classList.add('on');
 }
-const SHEET_FORMAT = 2;   // 1: locked sheets · 2: + Length (in), Width (in)
+const SHEET_FORMAT = 3;   // 1: locked sheets · 2: + Length (in), Width (in) · 3: renamed to Block & Bundle
+const APP_NAME = 'Block & Bundle';
 const toIn = (v, dim) => num(v) ? +(dim === 'cm' ? num(v) / 2.54 : num(v)).toFixed(1) : '';
 function csvText(list) {
   const h = ['Trip', 'Material', 'Type', 'Supplier', 'Location', 'Bundle', 'Block', 'Finish', 'Thickness', 'Slabs', 'Length', 'Width', 'Unit', 'Length (in)', 'Width (in)', 'Sq ft', 'Price', 'Currency', 'Price per', 'Bundle USD', 'USD per sq ft', 'Quality', 'Defects', 'Status', 'Notes', 'Photos in Drive', 'Photo count', 'Updated'];
@@ -391,9 +392,9 @@ function noteLock(r, name) {
 }
 const byCreated = (a, b) => (a.created || 0) - (b.created || 0);
 const csvBlob = list => new Blob([csvText(list).text], { type: 'text/csv' });
-const tripSheetName = key => `Bundle Book — ${tripOf(key === 'daily' ? '' : key).name}`;
+const tripSheetName = key => `${APP_NAME} — ${tripOf(key === 'daily' ? '' : key).name}`;
 
-// One Google Sheet per trip, in Bundle Book › Sheets. Each keeps the same file (and link) for good;
+// One Google Sheet per trip, in Block & Bundle › Sheets. Each keeps the same file (and link) for good;
 // its content is replaced in place and its name follows the trip's name. The file is tagged with the
 // trip's id (appProperties), so a renamed trip, or a new phone, still finds the same sheet.
 async function syncTripSheet(j, ctx) {
@@ -412,7 +413,7 @@ async function syncTripSheet(j, ctx) {
   await DB.put('meta', sh);
 }
 
-// Dated copy of every bundle across all trips, in Bundle Book › Sheets › Daily copies.
+// Dated copy of every bundle across all trips, in Block & Bundle › Sheets › Daily copies.
 // One per day, rewritten through the day; earlier days are left alone.
 async function syncSnapshot(ctx) {
   const day = today(), name = `All trips — ${day}`, sh = meta.sheets;
@@ -437,7 +438,7 @@ async function runSync() {
   const rank = { photo: 0, tripSheet: 1, snapshot: 2 };   // photos first, so sheets can link their folders
   const jobs = [...queue].sort((a, b) => (rank[a.kind] ?? 3) - (rank[b.kind] ?? 3) || a.at - b.at);
   try {
-    const root = await Drive.ensureFolder('Bundle Book');
+    const root = await Drive.ensureRoot(APP_NAME, ['Bundle Book']);
     const ctx = { root, photos: await Drive.ensureFolder('Photos', root), sheets: await Drive.ensureFolder('Sheets', root), trip: new Map(), checked: new Set() };
     meta.sync.root = root;
     let i = 0;
@@ -509,7 +510,7 @@ async function dvRender() {
      <dt>Account</dt><dd>${tok || Drive.email() ? esc(Drive.email() || 'Connected') + (tok ? '' : ' (sign-in expired)') : 'Not connected'}</dd>
      <dt>Waiting</dt><dd>${esc(wait || 'Nothing')}</dd>
      <dt>Last sync</dt><dd>${ago(meta.sync.last)}</dd>
-     <dt>Drive folder</dt><dd>${root ? `<a href="https://drive.google.com/drive/folders/${esc(root)}" target="_blank" rel="noopener">Bundle Book</a> › Photos / Sheets` : 'Bundle Book › Photos / Sheets (made on first sync)'}</dd>
+     <dt>Drive folder</dt><dd>${root ? `<a href="https://drive.google.com/drive/folders/${esc(root)}" target="_blank" rel="noopener">Block &amp; Bundle</a> › Photos / Sheets` : 'Block &amp; Bundle › Photos / Sheets (made on first sync)'}</dd>
      <dt>Today's copy</dt><dd>${last ? `<a href="${esc(last.url)}" target="_blank" rel="noopener">All trips — ${esc(last.day)}</a>` : 'None yet'}</dd>
      <dt>On this device</dt><dd>${esc(est || 'Unknown')}</dd>
    </dl>
@@ -519,7 +520,7 @@ async function dvRender() {
      ${ent ? `<button data-copy="${esc(ent.url)}" style="min-height:34px">Copy link</button>` : ''}</div>`).join('') : '<p class="note">Each trip gets its own sheet as soon as you create it. Day-to-day gets one when it has a bundle.</p>'}
    ${fails.length ? `<h3 style="margin-top:16px">Couldn't send</h3><ul class="note">${fails.map(j => `<li>${esc(jobLabel(j))}: ${esc(j.err)} (${j.tries} tr${j.tries === 1 ? 'y' : 'ies'})</li>`).join('')}</ul>` : ''}
    ${Object.keys(meta.sheets.unlocked || {}).length ? `<h3 style="margin-top:16px">Not locked</h3><ul class="note">${Object.values(meta.sheets.unlocked).map(u => `<li>${esc(u.name)}: Drive refused the lock (${esc(u.err)}). The next sync tries again.</li>`).join('')}</ul>` : ''}
-   <p class="note" style="margin-top:16px">Each trip has its own Google Sheet in Bundle Book › Sheets, replaced with that trip's bundles on every sync. The sheets are locked, so they open view-only and changes are made here in the app. A sheet's link never changes, even if you rename the trip, so you can pull it into your own spreadsheet with <code>=IMPORTRANGE("link", "A1:AZ")</code>. A dated copy of all trips is kept in Sheets › Daily copies. Photos go to Photos › trip › bundle. Deleting a bundle here doesn't delete its copies in Drive.</p>
+   <p class="note" style="margin-top:16px">Each trip has its own Google Sheet in Block &amp; Bundle › Sheets, replaced with that trip's bundles on every sync. The sheets are locked, so they open view-only and changes are made here in the app. A sheet's link never changes, even if you rename the trip, so you can pull it into your own spreadsheet with <code>=IMPORTRANGE("link", "A1:AZ")</code>. A dated copy of all trips is kept in Sheets › Daily copies. Photos go to Photos › trip › bundle. Deleting a bundle here doesn't delete its copies in Drive.</p>
    <p class="note">Google sign-in lasts about an hour. After that, anything new waits here until you tap Reconnect.</p>`;
   const go = $('dvGo'); if (go) go.onclick = () => tok ? runSync() : Drive.connect();
   $('dvBody').querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast('Sheet link copied'); } catch { toast('Copy was blocked by the browser.'); } });
@@ -623,7 +624,7 @@ if ('serviceWorker' in navigator) {
   let reloading = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => { if (reloading) location.reload(); });
   navigator.serviceWorker.register('sw.js').then(reg => {
-    const offer = w => toast('A new version of Bundle Book is ready.', 'Reload', () => { reloading = true; w.postMessage('skipWaiting'); });
+    const offer = w => toast('A new version of Block & Bundle is ready.', 'Reload', () => { reloading = true; w.postMessage('skipWaiting'); });
     if (reg.waiting && navigator.serviceWorker.controller) offer(reg.waiting);
     reg.addEventListener('updatefound', () => {
       const w = reg.installing;
@@ -654,7 +655,7 @@ if ('serviceWorker' in navigator) {
       meta.sheets.format = SHEET_FORMAT; await DB.put('meta', meta.sheets);
     }
   } catch (e) {
-    $('status').textContent = 'This browser won’t let Bundle Book store data (' + (e?.message || e) + '). Private browsing can cause this.';
+    $('status').textContent = 'This browser won’t let Block & Bundle store data (' + (e?.message || e) + '). Private browsing can cause this.';
     return;
   }
   render(); setSync(); refreshRates();

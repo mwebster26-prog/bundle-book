@@ -1,4 +1,4 @@
-// Tiny IndexedDB wrapper. Everything Bundle Book knows lives here, on the device.
+// Tiny IndexedDB wrapper. Everything Block & Bundle knows lives here, on the device.
 // Stores: bundles, trips, photos ({id, blob}), queue (Drive jobs), meta (sync state).
 window.DB = (() => {
   const NAME = 'bundle-book', VERSION = 1;
@@ -17,7 +17,7 @@ window.DB = (() => {
         res(d);
       };
       r.onerror = () => { dbp = null; rej(r.error); };
-      r.onblocked = () => rej(new Error('Storage is blocked by another open Bundle Book tab.'));
+      r.onblocked = () => rej(new Error('Storage is blocked by another open Block & Bundle tab.'));
     }));
   }
   async function run(store, mode, fn) {

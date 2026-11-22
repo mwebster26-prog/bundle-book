@@ -1,6 +1,6 @@
 {
-  "name": "Bundle Book",
-  "short_name": "Bundles",
+  "name": "Block & Bundle",
+  "short_name": "Block&Bundle",
   "description": "Offline yard notebook for stone bundles: photos, sizes, prices and decisions.",
   "id": "./",
   "start_url": "./",

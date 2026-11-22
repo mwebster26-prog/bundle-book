@@ -1,5 +1,5 @@
 // Google sign-in (OAuth 2.0 token flow by full-page redirect, which also works inside an
-// installed iPhone web app where pop-ups don't) and the few Drive API calls Bundle Book needs.
+// installed iPhone web app where pop-ups don't) and the few Drive API calls Block & Bundle needs.
 // Scope drive.file: the app can only see files and folders it created itself.
 window.Drive = (() => {
   const SCOPE = 'https://www.googleapis.com/auth/drive.file';
@@ -96,11 +96,32 @@ window.Drive = (() => {
     return r.files?.[0]?.id || null;
   }
 
-  // Finds a file the app tagged with appProperties {key: value} inside a folder.
+  // Finds a file the app tagged with appProperties {key: value}, inside a folder if one is given.
   async function findByProp(key, value, parent) {
-    const q = `appProperties has { key='${qv(key)}' and value='${qv(value)}' } and '${qv(parent)}' in parents and trashed = false`;
+    const q = `appProperties has { key='${qv(key)}' and value='${qv(value)}' }` + (parent ? ` and '${qv(parent)}' in parents` : '') + ' and trashed = false';
     const r = await g(API + '/files?' + new URLSearchParams({ q, fields: 'files(id)', pageSize: '1', spaces: 'drive' }));
     return r.files?.[0]?.id || null;
+  }
+
+  // The app's top folder. It's tagged (appProperties bbRoot=1), so it's found even after the app or the
+  // folder is renamed; an untagged folder under an earlier app name is adopted, renamed and tagged.
+  async function ensureRoot(name, oldNames = []) {
+    let id = await findByProp('bbRoot', '1');
+    for (const n of [name, ...oldNames]) { if (id) break; id = await findFile(n, 'root', FOLDER); }
+    if (!id) {
+      return (await g(API + '/files?fields=id', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, mimeType: FOLDER, parents: ['root'], appProperties: { bbRoot: '1' } }),
+      })).id;
+    }
+    const cur = await g(API + '/files/' + encodeURIComponent(id) + '?fields=name,appProperties');
+    if (cur.name !== name || cur.appProperties?.bbRoot !== '1') {
+      await g(API + '/files/' + encodeURIComponent(id) + '?fields=id', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, appProperties: { bbRoot: '1' } }),
+      });
+    }
+    return id;
   }
 
   // True if the file/folder still exists and isn't in the bin.
@@ -122,7 +143,7 @@ window.Drive = (() => {
 
   // Drive "lock" (content restriction): the file opens view-only for everyone, owner included,
   // until it's unlocked. The app unlocks, writes, and locks again on every sync.
-  const LOCK_REASON = 'Managed by Bundle Book. Make changes in the app; they sync here.';
+  const LOCK_REASON = 'Managed by Block & Bundle. Make changes in the app; they sync here.';
   const setLock = (id, on) => g(API + '/files/' + encodeURIComponent(id) + '?fields=id', {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ contentRestrictions: [on ? { readOnly: true, reason: LOCK_REASON } : { readOnly: false }] }),
@@ -137,5 +158,5 @@ window.Drive = (() => {
     return r;
   }
 
-  return { configured, writeLocked, token, connect, disconnect, handleRedirect, whoami, email, ensureFolder, findFile, findByProp, alive, upload, redirectUri, SHEET };
+  return { configured, writeLocked, token, connect, disconnect, handleRedirect, whoami, email, ensureFolder, ensureRoot, findFile, findByProp, alive, upload, redirectUri, SHEET };
 })();

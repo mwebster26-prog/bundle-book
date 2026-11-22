@@ -1,17 +1,17 @@
-# Bundle Book
+# Block & Bundle
 
 An installable, offline-first notebook for buying stone. Log bundles, photos, sizes, prices and decisions at the yard. It all saves on the phone first. When there's a connection, photos and one Google Sheet per trip sync to your Google Drive:
 
 ```
 My Drive
-└── Bundle Book
+└── Block & Bundle
     ├── Photos
     │   └── <Trip name>
     │       └── <Bundle #> — <Material> — <id>
     │           └── 4471_1_xxxxxx.jpg …
     └── Sheets
-        ├── Bundle Book — Brazil — March 2027   (one Google Sheet per trip)
-        ├── Bundle Book — Day-to-day
+        ├── Block & Bundle — Brazil — March 2027   (one Google Sheet per trip)
+        ├── Block & Bundle — Day-to-day
         └── Daily copies
             └── All trips — 2026-11-22   (dated copy of every trip, one per day)
 ```
@@ -79,7 +79,7 @@ In the [Google Cloud console](https://console.cloud.google.com/):
 1. Create a project, or pick an existing one.
 2. **APIs & Services › Library:** enable the **Google Drive API**.
 3. **Google Auth Platform › Branding** (older consoles call this the *OAuth consent screen*):
-   - App name: Bundle Book.
+   - App name: Block & Bundle.
    - User type: **External**.
    - Leave the app in **Testing**.
 4. **Audience › Test users:** add your own Google account. In Testing mode only listed accounts can sign in, which suits a one-person app. A browser-only app doesn't use refresh tokens, so Testing mode's 7-day refresh-token limit doesn't affect it.
