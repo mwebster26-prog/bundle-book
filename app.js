@@ -171,8 +171,10 @@ function edCalc() {
 const F = ['material', 'type', 'supplier', 'location', 'bundle', 'block', 'finish', 'thick', 'len', 'wid', 'slabs', 'price', 'cur', 'pmode', 'notes', 'tripId'];
 const fid = k => k === 'tripId' ? 'f_trip' : 'f_' + k;
 function readForm() { for (const k of F) edit[k] = $(fid(k)).value; }
+// New bundles go to the trip whose chip you're viewing; on "All", to the most recently added trip.
+const newestTrip = () => trips.reduce((a, t) => (!a || (t.created || 0) >= (a.created || 0) ? t : a), null) || DAILY;
 function openEd(b) {
-  const t = tripOf(cur === '*' ? '' : cur);
+  const t = cur === '*' ? newestTrip() : tripOf(cur);
   edit = b ? structuredClone(b) : { id: null, tripId: t.id, cur: t.cur, dim: t.dim, pmode: t.pmode, status: 'considering', quality: 0, defects: [], photos: [], type: 'Quartzite', finish: 'Polished', thick: '3 cm' };
   edAdded.clear();
   $('edT').textContent = b ? 'Edit bundle' : 'New bundle'; $('edDel').style.display = b ? '' : 'none';
