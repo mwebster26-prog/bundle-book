@@ -140,7 +140,9 @@ function render() {
     <div class="bd"><div style="display:flex;justify-content:space-between;gap:8px;align-items:start"><h3>${esc(b.material || 'Unnamed')}</h3><span class="pill s-${esc(b.status)}">${esc(ST[b.status] || '')}</span></div>
     <div class="meta">${esc([b.type, b.thick, b.finish].filter(Boolean).join(' · '))}</div>
     <div class="meta">${esc([b.supplier, b.location].filter(Boolean).join(' — '))}</div>
-    <div class="nums"><span><b>${fmt(c.sqft)}</b> sq ft</span><span><b>${usd2(c.psf)}</b>/sq ft</span><span><b>${usd(c.total)}</b></span></div>
+    ${sizeLine(b) ? `<div class="meta">${sizeLine(b)}</div>` : ''}
+    ${priceLine(b, c) ? `<div class="meta">${priceLine(b, c)}</div>` : ''}
+    <div class="nums"><span><b>${fmt(c.sqft)}</b> sq ft${c.m2 && (b.dim === 'cm' || b.pmode === 'm2') ? ` <span class="meta">(${c.m2.toFixed(1)} m²)</span>` : ''}</span><span><b>${usd2(c.psf)}</b>/sq ft</span><span><b>${usd(c.total)}</b></span></div>
     <div style="display:flex;justify-content:space-between;gap:8px"><span class="stars" aria-label="Quality ${b.quality || 0} of 5">${stars(b.quality)}</span><span class="meta">${n} photo${n === 1 ? '' : 's'}${(b.defects || []).length ? ' · ' + b.defects.length + ' flags' : ''}${driveNote(b, qp)}</span></div></div></article>`;
   }).join('');
   hydrate($('grid'));
@@ -165,6 +167,19 @@ function edRender() {
 // Live conversions shown under the size and price inputs: cm → inches, m² → sq ft, foreign currency → USD.
 const f1 = n => (+n.toFixed(1)).toLocaleString('en-US');
 const money = n => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// Card / compare lines. Slab size always ends in inches; price shows as entered, then in USD.
+function sizeLine(b) {
+  const L = num(b.len), W = num(b.wid);
+  if (!L || !W) return '';
+  return b.dim === 'cm' ? `${f1(L)} × ${f1(W)} cm · <b>${f1(L / 2.54)} × ${f1(W / 2.54)} in</b>` : `<b>${f1(L)} × ${f1(W)} in</b>`;
+}
+function priceLine(b, c) {
+  const p = num(b.price), per = esc(PM[b.pmode] || '');
+  if (!p) return '';
+  const orig = `${p.toLocaleString('en-US')} ${esc(b.cur)} ${per}`;
+  if (b.cur === 'USD') return b.pmode === 'm2' ? `${orig} = <b>${money(p / SQFT)} per sq ft</b>` : '';
+  return c.rate ? `${orig} ≈ <b>${money(p * c.rate)} ${per}</b>` : `${orig} · no rate set`;
+}
 function convHints(c) {
   const L = num(edit.len), W = num(edit.wid), p = num(edit.price);
   let size = '';
@@ -296,7 +311,8 @@ function compare() {
   $('cpBody').innerHTML = `<table><tbody>${row('Photo', b => b.photos?.[0] ? imgTag(b.photos[0], `alt="" data-big="${esc(b.photos[0])}"`) : '—')}
    ${row('Material', b => `<b>${esc(b.material)}</b>`)}${row('Supplier', b => esc(b.supplier))}${row('Bundle #', b => esc(b.bundle))}
    ${row('Type · finish', b => esc([b.type, b.thick, b.finish].filter(Boolean).join(' · ')))}
-   ${row('Slabs × size', b => esc(`${b.slabs || '?'} × ${b.len || '?'}×${b.wid || '?'} ${b.dim}`))}${row('Sq ft', (b, c) => fmt(c.sqft))}
+   ${row('Slabs × size', b => `${esc(b.slabs || '?')} slabs<br>${sizeLine(b) || '—'}`)}${row('Sq ft', (b, c) => fmt(c.sqft) + (c.m2 ? ` <span class="note">(${c.m2.toFixed(1)} m²)</span>` : ''))}
+   ${row('Price', (b, c) => priceLine(b, c) || (num(b.price) ? `${money(num(b.price))} ${esc(PM[b.pmode] || '')}` : '—'))}
    ${row('USD / sq ft', (b, c) => usd2(c.psf))}${row('Bundle USD', (b, c) => usd(c.total))}${row('Quality', b => `<span class="stars">${stars(b.quality)}</span>`)}
    ${row('Flags', b => esc((b.defects || []).join(', ')) || '—')}${row('Notes', b => esc(b.notes) || '—')}${row('Decision', b => `<span class="pill s-${esc(b.status)}">${esc(ST[b.status])}</span>`)}</tbody></table>`;
   hydrate($('cpBody'));
