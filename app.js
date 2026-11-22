@@ -47,15 +47,58 @@ function hydrate(root) { root.querySelectorAll('img[data-ph]:not([src])').forEac
 async function bigPhoto(id) { const u = await phUrl(id); if (u) { $('lbImg').src = u; $('lb').classList.add('on'); } }
 
 /* ---------- numbers ---------- */
+/* ---------- exchange rates ----------
+   meta.fx = {rates: {EUR: 1.099, BRL: 0.1684}, date, source, at} — USD value of 1 unit, from the
+   European Central Bank's daily reference rates (Frankfurter), with open.er-api.com as a fallback. */
+const FX_MAX_AGE = 3 * 3600e3;
+const fxRate = c => c === 'USD' ? 1 : num(meta.fx?.rates?.[c]);
+const autoRate = t => t.cur !== 'USD' && t.auto !== false;   // trips update automatically unless you typed a rate
+const fmtRate = r => r ? String(+(+r).toPrecision(4)) : '';
+const fxWhen = () => meta.fx?.date ? new Date(meta.fx.date + 'T12:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '';
+async function fetchRates() {
+  const want = CUR.filter(c => c !== 'USD');
+  const invert = src => Object.fromEntries(want.filter(c => src?.[c] > 0).map(c => [c, +(1 / src[c]).toFixed(6)]));
+  try {
+    const r = await fetch(`https://api.frankfurter.dev/v1/latest?base=USD&symbols=${want.join(',')}`);
+    if (r.ok) { const d = await r.json(); const rates = invert(d.rates); if (Object.keys(rates).length) return { rates, date: d.date, source: 'European Central Bank' }; }
+  } catch {}
+  const r = await fetch('https://open.er-api.com/v6/latest/USD');
+  const d = await r.json();
+  if (d.result !== 'success') throw new Error('No exchange rates available');
+  return { rates: invert(d.rates), date: new Date(d.time_last_update_unix * 1000).toISOString().slice(0, 10), source: 'ExchangeRate-API' };
+}
+async function refreshRates(force) {
+  if (refreshRates.busy || !navigator.onLine) return;
+  if (!force && meta.fx?.at && Date.now() - meta.fx.at < FX_MAX_AGE) return;
+  refreshRates.busy = true;
+  try {
+    const old = meta.fx?.rates || {}, fx = await fetchRates();
+    meta.fx = { id: 'fx', ...fx, at: Date.now() }; await DB.put('meta', meta.fx);
+    const moved = new Set(Object.keys(fx.rates).filter(c => fx.rates[c] !== old[c]));
+    const affected = new Set();
+    for (const t of trips) if (autoRate(t) && fx.rates[t.cur] && fx.rates[t.cur] !== t.rate) {
+      t.rate = fx.rates[t.cur]; await DB.put('trips', t); affected.add(t.id);
+    }
+    // Bundles priced in a currency other than their trip's use the live rate directly.
+    for (const b of bundles) if (b.cur !== 'USD' && b.cur !== tripOf(b.tripId).cur && moved.has(b.cur)) affected.add(b.tripId || '');
+    if (affected.size && bundles.some(b => affected.has(b.tripId || ''))) {
+      for (const tid of affected) await enqueueTripSheet(tid);
+      await enqueueSnapshot(); setSync(); kick();
+    }
+    render(); if ($('tp').classList.contains('on')) { tpRender(); tFxNote(); } if (edit) edCalc();
+  } catch {} finally { refreshRates.busy = false; }
+}
+
 function calc(b) {
-  const t = tripOf(b.tripId), rate = b.cur === t.cur ? num(t.rate) || 1 : (b.cur === 'USD' ? 1 : (num(t.rate) || 0));
+  const t = tripOf(b.tripId);
+  const rate = b.cur === 'USD' ? 1 : b.cur === t.cur ? (num(t.rate) || fxRate(t.cur)) : fxRate(b.cur);
   const L = num(b.len), W = num(b.wid), n = num(b.slabs);
   const slabM2 = b.dim === 'in' ? L * W / 1550.0031 : L * W / 10000;
   const m2 = slabM2 * n, sqft = m2 * SQFT, p = num(b.price);
   let local = 0;
   if (b.pmode === 'm2') local = p * m2; else if (b.pmode === 'sqft') local = p * sqft; else if (b.pmode === 'bundle') local = p; else if (b.pmode === 'slab') local = p * n;
   const total = local * rate;
-  return { m2, sqft, local, total, psf: sqft ? total / sqft : 0, rateKnown: !!rate };
+  return { m2, sqft, local, total, psf: sqft ? total / sqft : 0, rate, rateKnown: !!rate };
 }
 const stars = q => q ? '★'.repeat(q) + '☆'.repeat(5 - q) : '';
 
@@ -123,7 +166,7 @@ function edCalc() {
   readForm(); const c = calc(edit), t = tripOf(edit.tripId);
   $('calc').innerHTML = `<div><b>${c.m2 ? c.m2.toFixed(2) : '—'}</b><span>m² total</span></div><div><b>${fmt(c.sqft)}</b><span>sq ft total</span></div>
    <div><b>${usd2(c.psf)}</b><span>USD per sq ft</span></div><div><b>${c.local ? Math.round(c.local).toLocaleString('en-US') + ' ' + esc(edit.cur) : '—'}</b><span>bundle cost</span></div>
-   <div><b>${usd(c.total)}</b><span>bundle in USD</span></div><div><b>${esc(t.cur === 'USD' ? '—' : t.rate || 'set rate')}</b><span>${esc(t.cur)}→USD rate</span></div>`;
+   <div><b>${usd(c.total)}</b><span>bundle in USD</span></div><div><b>${esc(edit.cur === 'USD' ? '—' : fmtRate(c.rate) || 'set rate')}</b><span>${esc(edit.cur)}→USD rate${edit.cur !== 'USD' && (edit.cur !== t.cur || autoRate(t)) && meta.fx ? ' · live ' + esc(fxWhen()) : ''}</span></div>`;
 }
 const F = ['material', 'type', 'supplier', 'location', 'bundle', 'block', 'finish', 'thick', 'len', 'wid', 'slabs', 'price', 'cur', 'pmode', 'notes', 'tripId'];
 const fid = k => k === 'tripId' ? 'f_trip' : 'f_' + k;
@@ -185,15 +228,33 @@ async function addPhotos(files) {
 /* ---------- trips ---------- */
 function tpRender() {
   $('tpList').innerHTML = trips.length ? trips.map(t => `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:1px solid var(--line);padding:10px 0">
-   <div><b>${esc(t.name)}</b><div class="note">${esc(t.cur)} · 1 ${esc(t.cur)} = $${esc(t.rate)} · ${esc(t.dim)} · ${esc(PM[t.pmode] || '')}</div></div>
+   <div><b>${esc(t.name)}</b><div class="note">${esc(t.cur)}${t.cur === 'USD' ? '' : ` · 1 ${esc(t.cur)} = $${esc(fmtRate(t.rate) || '?')} · ${autoRate(t) ? 'auto-updated' + (meta.fx ? ' ' + esc(fxWhen()) : '') : 'fixed rate'}`} · ${esc(t.dim)} · ${esc(PM[t.pmode] || '')}</div></div>
    <button data-et="${esc(t.id)}">Edit</button></div>`).join('') : '<p class="note">No trips yet. "Day-to-day" (USD, inches, per sq ft) is always there.</p>';
 }
-function tForm(t) { editingTrip = t?.id || null; $('t_name').value = t?.name || ''; $('t_cur').value = t?.cur || 'EUR'; $('t_rate').value = t?.rate || ''; $('t_dim').value = t?.dim || 'cm'; $('t_pmode').value = t?.pmode || 'm2'; }
+// Trip form: the rate box follows the live rate while "auto" is ticked; typing a rate unticks it.
+function tFxNote() {
+  const c = $('t_cur').value, usdTrip = c === 'USD', live = fxRate(c), auto = $('t_auto').checked;
+  $('t_autoRow').style.display = usdTrip ? 'none' : '';
+  $('t_rate').disabled = usdTrip;
+  if (usdTrip) { $('t_rate').value = 1; return; }
+  if (auto && live) $('t_rate').value = fmtRate(live);
+  $('t_fx').textContent = live
+    ? `Today's rate: 1 ${c} = $${fmtRate(live)} (${meta.fx.source}, ${fxWhen()}).` + (auto ? ' Updates on its own when the app is online.' : ' Your rate stays fixed.')
+    : navigator.onLine ? 'Getting today’s rate…' : 'Offline: enter a rate for now. It updates when you’re back online.';
+  if (!live) refreshRates(true).then(() => { if (fxRate(c) && $('t_cur').value === c) tFxNote(); });
+}
+function tForm(t) {
+  editingTrip = t?.id || null; $('t_name').value = t?.name || ''; $('t_cur').value = t?.cur || 'EUR'; $('t_rate').value = fmtRate(t?.rate);
+  $('t_dim').value = t?.dim || 'cm'; $('t_pmode').value = t?.pmode || 'm2'; $('t_auto').checked = t ? t.auto !== false : true;
+  tFxNote();
+}
 async function saveTrip() {
   const name = $('t_name').value.trim(); if (!name) return toast('Give the trip a name.');
-  const c = $('t_cur').value, rate = c === 'USD' ? 1 : num($('t_rate').value); if (!rate) return toast('Enter the exchange rate to USD.');
+  const c = $('t_cur').value, auto = c !== 'USD' && $('t_auto').checked;
+  const rate = c === 'USD' ? 1 : (auto && fxRate(c)) || num($('t_rate').value);
+  if (!rate) return toast(navigator.onLine ? 'Enter the exchange rate to USD.' : 'Offline: enter the exchange rate for now. It updates when you’re back online.');
   const id = editingTrip || newId('t'), old = trips.find(t => t.id === id);
-  const t = { id, name, cur: c, rate, dim: $('t_dim').value, pmode: $('t_pmode').value, created: old?.created || Date.now() };
+  const t = { id, name, cur: c, rate, auto, dim: $('t_dim').value, pmode: $('t_pmode').value, created: old?.created || Date.now() };
   try {
     await DB.put('trips', t);
     trips = (old ? trips.map(x => x.id === id ? t : x) : [...trips, t]).sort((a, b) => (a.created || 0) - (b.created || 0));
@@ -492,7 +553,9 @@ $('cfNo').onclick = () => $('cf').classList.remove('on'); $('cfYes').onclick = (
 $('tripBtn').onclick = () => { tpRender(); tForm(); $('tp').classList.add('on'); }; $('tpClose').onclick = () => $('tp').classList.remove('on');
 $('tpList').onclick = e => { const b = e.target.closest('[data-et]'); if (b) tForm(trips.find(t => t.id === b.dataset.et)); };
 $('tSave').onclick = saveTrip; $('tNew').onclick = () => tForm();
-$('t_cur').onchange = () => { if ($('t_cur').value === 'USD') $('t_rate').value = 1; };
+$('t_cur').onchange = tFxNote;
+$('t_auto').onchange = tFxNote;
+$('t_rate').addEventListener('input', () => { if ($('t_auto').checked) { $('t_auto').checked = false; tFxNote(); } });
 $('cmpGo').onclick = compare; $('cmpClear').onclick = () => { cmp.clear(); render(); }; $('cpClose').onclick = () => $('cp').classList.remove('on');
 $('cpBody').onclick = e => { if (e.target.dataset.big) bigPhoto(e.target.dataset.big); };
 $('csvBtn').onclick = csv;
@@ -501,9 +564,9 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
   for (const s of ['lb', 'cf', 'cp', 'dv', 'tp', 'ed']) if ($(s).classList.contains('on')) { s === 'ed' ? closeEd(false) : $(s).classList.remove('on'); break; }
 });
-addEventListener('online', () => { setSync(); kick(500); });
+addEventListener('online', () => { setSync(); kick(500); refreshRates(); });
 addEventListener('offline', setSync);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { setSync(); kick(500); } });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { setSync(); kick(500); refreshRates(); } });
 setInterval(() => { if (document.visibilityState === 'visible' && queue.length) runSync(); else setSync(); }, 5 * 60e3);
 
 /* ---------- install + updates ---------- */
@@ -548,7 +611,7 @@ if ('serviceWorker' in navigator) {
     $('status').textContent = 'This browser won’t let Bundle Book store data (' + (e?.message || e) + '). Private browsing can cause this.';
     return;
   }
-  render(); setSync();
+  render(); setSync(); refreshRates();
   if (back?.ok) { toast('Google Drive connected'); Drive.whoami().catch(() => {}).finally(() => kick(200)); }
   else if (back?.error) toast(back.error === 'access_denied' ? 'Google sign-in was cancelled.' : 'Google sign-in failed (' + back.error + ').');
   else kick(1000);

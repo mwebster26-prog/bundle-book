@@ -42,6 +42,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 input,select,textarea{width:100%;min-height:44px;border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:8px 10px}
 textarea{min-height:120px;resize:vertical}
 label{display:block;font-size:13px;color:var(--mute);font-weight:600;margin-bottom:4px}
+label.check{display:flex;gap:10px;align-items:center;font-size:16px;color:var(--ink);font-weight:500;min-height:44px;margin:0;cursor:pointer}
+label.check input{width:22px;min-height:22px;height:22px;margin:0;accent-color:var(--ink)}
 .top{display:flex;flex-wrap:wrap;gap:12px;align-items:end;justify-content:space-between}
 .sub{color:var(--mute);margin:6px 0 0}
 .acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
@@ -166,6 +168,7 @@ code{font-size:13px;background:var(--panel);padding:2px 6px;border-radius:4px;ov
     <div class="full"><label for="t_name">Trip name</label><input id="t_name" placeholder="Brazil — March 2027"></div>
     <div><label for="t_cur">Currency</label><select id="t_cur"></select></div>
     <div><label for="t_rate">1 unit = how many USD</label><input id="t_rate" inputmode="decimal" placeholder="e.g. 1.08 for EUR"></div>
+    <div class="full" id="t_autoRow"><label class="check"><input type="checkbox" id="t_auto"> Keep this rate updated automatically</label><p class="note" id="t_fx" style="margin:4px 0 0"></p></div>
     <div><label for="t_dim">Default size unit</label><select id="t_dim"><option value="cm">cm</option><option value="in">inches</option></select></div>
     <div><label for="t_pmode">Default price per</label><select id="t_pmode"></select></div>
     <div class="full" style="display:flex;gap:8px"><button class="pri" id="tSave">Save trip</button><button id="tNew">Clear form</button></div>

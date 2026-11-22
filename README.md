@@ -43,6 +43,11 @@ Your sheet then updates on its own whenever the app syncs.
 ## How it works
 
 - **Storage:** bundles, trips and full photos live in the browser's IndexedDB on the device. On the first save the app asks the browser for persistent storage, so the OS is less likely to clear it.
+- **Exchange rates:** a non-USD trip keeps its rate to USD updated automatically.
+  - Rates are the European Central Bank's daily reference rates, via frankfurter.dev, with open.er-api.com as a backup. They refresh when the app opens or comes back online, at most every 3 hours.
+  - Typing your own rate on a trip turns auto-update off, so the trip keeps a fixed rate. Tick the box again to go back to the live rate.
+  - A bundle priced in a different currency from its trip always uses the live rate.
+  - When a rate moves, the affected trip sheets re-sync. Offline, the last known rate is used.
 - **Offline:** a service worker (`sw.js`) caches the app, so it opens with no signal. Google Fonts are cached the first time they load.
 - **Sync queue:** each save queues the bundle's new photos, a rewrite of its trip's sheet, and a rewrite of today's all-trips copy. Repeated edits before a sync still mean one upload per sheet. The queue runs:
   - when you save
