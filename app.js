@@ -278,6 +278,11 @@ async function syncPhoto(j, ctx) {
   await putSyncMeta(b.id, sm);
 }
 const sheetUrl = r => r.webViewLink || `https://docs.google.com/spreadsheets/d/${r.id}/edit`;
+// Remember sheets the app wrote but couldn't re-lock, so the Drive panel can say so.
+function noteLock(r, name) {
+  const sh = meta.sheets; sh.unlocked ||= {};
+  if (r.lockError) sh.unlocked[r.id] = { name, err: r.lockError }; else delete sh.unlocked[r.id];
+}
 const byCreated = (a, b) => (a.created || 0) - (b.created || 0);
 const csvBlob = list => new Blob([csvText(list).text], { type: 'text/csv' });
 const tripSheetName = key => `Bundle Book — ${tripOf(key === 'daily' ? '' : key).name}`;
@@ -294,9 +299,10 @@ async function syncTripSheet(j, ctx) {
   if (!ent?.id) { const id = await Drive.findByProp('bbTrip', key, ctx.sheets); if (id) ent = { id }; }
   const name = tripSheetName(key), blob = csvBlob(list);
   const r = ent?.id && await Drive.alive(ent.id)
-    ? await Drive.upload({ name }, blob, ent.id)
-    : await Drive.upload({ name, parents: [ctx.sheets], mimeType: Drive.SHEET, appProperties: { bbTrip: key } }, blob);
+    ? await Drive.writeLocked({ name }, blob, ent.id)
+    : await Drive.writeLocked({ name, parents: [ctx.sheets], mimeType: Drive.SHEET, appProperties: { bbTrip: key } }, blob);
   sh.trips[key] = { id: r.id, url: sheetUrl(r) };
+  noteLock(r, name);
   await DB.put('meta', sh);
 }
 
@@ -308,12 +314,13 @@ async function syncSnapshot(ctx) {
   const blob = csvBlob(list);
   let r = null; const ent = sh.byDay[day];
   if (ent?.id && await Drive.alive(ent.id)) {
-    try { r = await Drive.upload({ name }, blob, ent.id); } catch (e) { if (e.code !== 'http') throw e; }
+    try { r = await Drive.writeLocked({ name }, blob, ent.id); } catch (e) { if (e.code !== 'http') throw e; }
   }
   if (!r) {
     ctx.daily ||= await Drive.ensureFolder('Daily copies', ctx.sheets);
-    r = await Drive.upload({ name, parents: [ctx.daily], mimeType: Drive.SHEET }, blob);
+    r = await Drive.writeLocked({ name, parents: [ctx.daily], mimeType: Drive.SHEET }, blob);
   }
+  noteLock(r, name);
   sh.byDay[day] = { id: r.id, url: sheetUrl(r) };
   sh.last = { day, ...sh.byDay[day] };
   await DB.put('meta', sh);
@@ -405,7 +412,8 @@ async function dvRender() {
      <div>${ent ? `<a href="${esc(ent.url)}" target="_blank" rel="noopener">${esc(t.name)}</a>` : `<b>${esc(t.name)}</b> <span class="note">· made on next sync</span>`}</div>
      ${ent ? `<button data-copy="${esc(ent.url)}" style="min-height:34px">Copy link</button>` : ''}</div>`).join('') : '<p class="note">Each trip gets its own sheet as soon as you create it. Day-to-day gets one when it has a bundle.</p>'}
    ${fails.length ? `<h3 style="margin-top:16px">Couldn't send</h3><ul class="note">${fails.map(j => `<li>${esc(jobLabel(j))}: ${esc(j.err)} (${j.tries} tr${j.tries === 1 ? 'y' : 'ies'})</li>`).join('')}</ul>` : ''}
-   <p class="note" style="margin-top:16px">Each trip has its own Google Sheet in Bundle Book › Sheets, replaced with that trip's bundles on every sync. A sheet's link never changes, even if you rename the trip, so you can pull it into your own spreadsheet with <code>=IMPORTRANGE("link", "A1:Z")</code>. Don't type into these sheets; your edits would be overwritten. A dated copy of all trips is kept in Sheets › Daily copies. Photos go to Photos › trip › bundle. Deleting a bundle here doesn't delete its copies in Drive.</p>
+   ${Object.keys(meta.sheets.unlocked || {}).length ? `<h3 style="margin-top:16px">Not locked</h3><ul class="note">${Object.values(meta.sheets.unlocked).map(u => `<li>${esc(u.name)}: Drive refused the lock (${esc(u.err)}). The next sync tries again.</li>`).join('')}</ul>` : ''}
+   <p class="note" style="margin-top:16px">Each trip has its own Google Sheet in Bundle Book › Sheets, replaced with that trip's bundles on every sync. The sheets are locked, so they open view-only and changes are made here in the app. A sheet's link never changes, even if you rename the trip, so you can pull it into your own spreadsheet with <code>=IMPORTRANGE("link", "A1:Z")</code>. A dated copy of all trips is kept in Sheets › Daily copies. Photos go to Photos › trip › bundle. Deleting a bundle here doesn't delete its copies in Drive.</p>
    <p class="note">Google sign-in lasts about an hour. After that, anything new waits here until you tap Reconnect.</p>`;
   const go = $('dvGo'); if (go) go.onclick = () => tok ? runSync() : Drive.connect();
   $('dvBody').querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast('Sheet link copied'); } catch { toast('Copy was blocked by the browser.'); } });
@@ -530,6 +538,12 @@ if ('serviceWorker' in navigator) {
     // Every trip gets its own sheet: queue one for any trip (or a non-empty Day-to-day) that doesn't have one yet.
     const want = [...trips.map(t => t.id), ...(bundles.some(b => !b.tripId) ? [''] : [])];
     for (const tid of want) if (!meta.sheets.trips[tripKey(tid)] && !queue.some(j => j.id === 'sheet:' + tripKey(tid))) await enqueueTripSheet(tid);
+    // Sheets made before locking existed: rewrite them once so they get locked.
+    if (!meta.sheets.lockV) {
+      for (const key of Object.keys(meta.sheets.trips)) await enqueueTripSheet(key === 'daily' ? '' : key);
+      if (meta.sheets.byDay[today()]) await enqueueSnapshot();
+      meta.sheets.lockV = 1; await DB.put('meta', meta.sheets);
+    }
   } catch (e) {
     $('status').textContent = 'This browser won’t let Bundle Book store data (' + (e?.message || e) + '). Private browsing can cause this.';
     return;

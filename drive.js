@@ -120,5 +120,22 @@ window.Drive = (() => {
     return g(url, { method: fileId ? 'PATCH' : 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + b }, body });
   }
 
-  return { configured, token, connect, disconnect, handleRedirect, whoami, email, ensureFolder, findFile, findByProp, alive, upload, redirectUri, SHEET };
+  // Drive "lock" (content restriction): the file opens view-only for everyone, owner included,
+  // until it's unlocked. The app unlocks, writes, and locks again on every sync.
+  const LOCK_REASON = 'Managed by Bundle Book. Make changes in the app; they sync here.';
+  const setLock = (id, on) => g(API + '/files/' + encodeURIComponent(id) + '?fields=id', {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contentRestrictions: [on ? { readOnly: true, reason: LOCK_REASON } : { readOnly: false }] }),
+  });
+  // Create or replace a file's content, leaving it locked. Returns the upload result plus lockError
+  // if only the final re-lock failed (the content is written either way; the next sync re-locks).
+  async function writeLocked(meta, blob, fileId) {
+    if (fileId) await setLock(fileId, false);
+    const r = await upload(meta, blob, fileId);
+    try { await setLock(r.id, true); }
+    catch (e) { if (e.code === 'auth' || e.code === 'offline') throw e; r.lockError = e.message; }
+    return r;
+  }
+
+  return { configured, writeLocked, token, connect, disconnect, handleRedirect, whoami, email, ensureFolder, findFile, findByProp, alive, upload, redirectUri, SHEET };
 })();

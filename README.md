@@ -23,7 +23,9 @@ My Drive
 - **Renaming a trip** renames its sheet. The link stays the same, because each sheet is tagged with its trip's internal id.
 - **Day-to-day** gets a sheet once it has a bundle.
 - **A new phone** finds the existing trip sheets rather than making copies.
-- **Don't type into a trip sheet.** Each sync overwrites it.
+- **Sheets are locked (view only).** The app applies Drive's file lock, so each sheet opens read-only for everyone, you included, and changes are made in the app. On each sync the app unlocks the sheet, writes the new data, and locks it again within seconds.
+  - As the owner you can still remove the lock by hand in Google Sheets, but any edits you make are overwritten on the next sync.
+  - If Drive ever refuses the lock, the sheet still updates, the Drive panel lists it under "Not locked", and the next sync tries again.
 
 ### Using a trip sheet in your own spreadsheet
 
