@@ -5,13 +5,29 @@ An installable, offline-first notebook for buying stone. Log bundles, photos, si
 ```
 My Drive
 └── Bundle Book
+    ├── Bundle Book — Live   (Google Sheet, always current, same link forever)
     ├── Photos
     │   └── <Trip name>
     │       └── <Bundle #> — <Material> — <id>
     │           └── 4471_1_xxxxxx.jpg …
     └── Sheets
-        └── Bundle Book — 2026-11-21   (Google Sheet, one per day)
+        └── Bundle Book — 2026-11-21   (dated copy, one per day)
 ```
+
+### Using the live sheet in your own spreadsheet
+
+"Bundle Book — Live" is replaced with every bundle on each sync. Its address never changes. Don't type into it, because each sync overwrites it.
+
+To build your own views, formulas or formatting:
+
+1. In the app, tap **Drive**, then **Copy link** next to the live sheet.
+2. In your own Google Sheet, enter:
+   ```
+   =IMPORTRANGE("paste-the-link-here", "A1:Z")
+   ```
+3. Click **Allow access** the first time.
+
+Your sheet then updates on its own whenever the app syncs.
 
 ## How it works
 
@@ -25,7 +41,7 @@ My Drive
   - when you tap **Drive › Sync now**
 
   Failed jobs stay queued, with the error shown in the Drive panel.
-- **Sheets:** there is one sheet per day, named by date. Each sync that day rewrites it with every bundle. Earlier days' sheets are left as snapshots.
+- **Sheets:** each sync replaces the content of the single live sheet, keeping the same file. It also rewrites that day's dated copy. Earlier days' copies are left as snapshots.
 - **Google sign-in:** the app redirects to Google's sign-in page and back, using your OAuth client and only the `drive.file` scope. That scope lets the app see only the files and folders it created, nothing else in your Drive. Pop-ups aren't used because they fail inside an installed iPhone app.
   - Google gives a browser-only app a token for about an hour and no refresh token.
   - After the hour, new items wait on the phone until you tap **Reconnect**. That's usually a single tap, because Google remembers your consent.

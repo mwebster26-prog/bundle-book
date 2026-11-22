@@ -81,14 +81,19 @@ window.Drive = (() => {
 
   const qv = s => String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   async function ensureFolder(name, parent = 'root') {
-    const q = `name = '${qv(name)}' and mimeType = '${FOLDER}' and '${qv(parent)}' in parents and trashed = false`;
-    const r = await g(API + '/files?' + new URLSearchParams({ q, fields: 'files(id)', pageSize: '1', spaces: 'drive' }));
-    if (r.files?.[0]?.id) return r.files[0].id;
+    const found = await findFile(name, parent, FOLDER);
+    if (found) return found;
     const c = await g(API + '/files?fields=id', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, mimeType: FOLDER, parents: [parent] }),
     });
     return c.id;
+  }
+
+  async function findFile(name, parent, mimeType) {
+    const q = `name = '${qv(name)}' and mimeType = '${mimeType}' and '${qv(parent)}' in parents and trashed = false`;
+    const r = await g(API + '/files?' + new URLSearchParams({ q, fields: 'files(id)', pageSize: '1', spaces: 'drive' }));
+    return r.files?.[0]?.id || null;
   }
 
   // True if the file/folder still exists and isn't in the bin.
@@ -108,5 +113,5 @@ window.Drive = (() => {
     return g(url, { method: fileId ? 'PATCH' : 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + b }, body });
   }
 
-  return { configured, token, connect, disconnect, handleRedirect, whoami, email, ensureFolder, alive, upload, redirectUri, SHEET };
+  return { configured, token, connect, disconnect, handleRedirect, whoami, email, ensureFolder, findFile, alive, upload, redirectUri, SHEET };
 })();

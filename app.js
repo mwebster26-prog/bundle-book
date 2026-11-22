@@ -273,16 +273,33 @@ async function syncPhoto(j, ctx) {
   sm.photos[j.photoId] = r.id;
   await putSyncMeta(b.id, sm);
 }
+const sheetUrl = r => r.webViewLink || `https://docs.google.com/spreadsheets/d/${r.id}/edit`;
+const LIVE_NAME = 'Bundle Book — Live';
 async function syncSheet(ctx) {
   const day = today(), name = `Bundle Book — ${day}`;
   const list = [...bundles].sort((a, b) => tripOf(a.tripId).name.localeCompare(tripOf(b.tripId).name) || (a.created || 0) - (b.created || 0));
   const blob = new Blob([csvText(list).text], { type: 'text/csv' });
-  const sh = meta.sheets; let r = null, ent = sh.byDay[day];
+  const sh = meta.sheets;
+
+  // The live sheet keeps the same file (and address) for good, so other sheets can IMPORTRANGE it.
+  // Its content is replaced in place; it's only re-created if it was deleted from Drive.
+  let live = null;
+  if (!sh.live?.id) {   // first run, or a new device: reuse an existing live sheet if there is one
+    const id = await Drive.findFile(LIVE_NAME, ctx.root, Drive.SHEET);
+    if (id) sh.live = { id, url: `https://docs.google.com/spreadsheets/d/${id}/edit` };
+  }
+  if (sh.live?.id && await Drive.alive(sh.live.id)) live = await Drive.upload({ name: LIVE_NAME }, blob, sh.live.id);
+  else live = await Drive.upload({ name: LIVE_NAME, parents: [ctx.root], mimeType: Drive.SHEET }, blob);
+  sh.live = { id: live.id, url: sheetUrl(live) };
+  await DB.put('meta', sh);
+
+  // Dated snapshot: one per day, rewritten through the day; earlier days are left alone.
+  let r = null; const ent = sh.byDay[day];
   if (ent?.id && await Drive.alive(ent.id)) {
     try { r = await Drive.upload({ name }, blob, ent.id); } catch (e) { if (e.code !== 'http') throw e; }
   }
   if (!r) r = await Drive.upload({ name, parents: [ctx.sheets], mimeType: Drive.SHEET }, blob);
-  sh.byDay[day] = { id: r.id, url: r.webViewLink || `https://docs.google.com/spreadsheets/d/${r.id}/edit` };
+  sh.byDay[day] = { id: r.id, url: sheetUrl(r) };
   sh.last = { day, ...sh.byDay[day] };
   await DB.put('meta', sh);
 }
@@ -355,13 +372,15 @@ async function dvRender() {
      <dt>Waiting</dt><dd>${ph || sh ? [ph ? ph + ' photo' + (ph === 1 ? '' : 's') : '', sh ? 'sheet update' : ''].filter(Boolean).join(', ') : 'Nothing'}</dd>
      <dt>Last sync</dt><dd>${ago(meta.sync.last)}</dd>
      <dt>Drive folder</dt><dd>${root ? `<a href="https://drive.google.com/drive/folders/${esc(root)}" target="_blank" rel="noopener">Bundle Book</a> › Photos / Sheets` : 'Bundle Book › Photos / Sheets (made on first sync)'}</dd>
-     <dt>Latest sheet</dt><dd>${last ? `<a href="${esc(last.url)}" target="_blank" rel="noopener">Bundle Book — ${esc(last.day)}</a>` : 'None yet'}</dd>
+     <dt>Live sheet</dt><dd>${meta.sheets.live ? `<a href="${esc(meta.sheets.live.url)}" target="_blank" rel="noopener">${LIVE_NAME}</a> <button id="dvCopy" style="min-height:34px;margin-left:6px">Copy link</button>` : 'Made on first sync'}</dd>
+     <dt>Today's copy</dt><dd>${last ? `<a href="${esc(last.url)}" target="_blank" rel="noopener">Bundle Book — ${esc(last.day)}</a>` : 'None yet'}</dd>
      <dt>On this device</dt><dd>${esc(est || 'Unknown')}</dd>
    </dl>
    ${fails.length ? `<h3>Couldn't send</h3><ul class="note">${fails.map(j => `<li>${esc(j.kind === 'sheet' ? 'Sheet' : 'Photo for ' + (bundles.find(b => b.id === j.bundleId)?.material || 'a bundle'))}: ${esc(j.err)} (${j.tries} tr${j.tries === 1 ? 'y' : 'ies'})</li>`).join('')}</ul>` : ''}
-   <p class="note">One Google Sheet is kept per day, named by date, and rewritten with every bundle each time it syncs that day. Earlier days' sheets stay as snapshots. Photos go to Photos › trip › bundle. Deleting a bundle here doesn't delete its copies in Drive.</p>
+   <p class="note">“${LIVE_NAME}” sits in the Bundle Book folder and is replaced with every bundle on each sync. Its link never changes, so you can pull it into your own spreadsheet with <code>=IMPORTRANGE("link", "A1:Z")</code>. Don't type into it; your edits would be overwritten. A dated copy is also kept in Sheets, one per day. Photos go to Photos › trip › bundle. Deleting a bundle here doesn't delete its copies in Drive.</p>
    <p class="note">Google sign-in lasts about an hour. After that, anything new waits here until you tap Reconnect.</p>`;
   const go = $('dvGo'); if (go) go.onclick = () => tok ? runSync() : Drive.connect();
+  const cp = $('dvCopy'); if (cp) cp.onclick = async () => { try { await navigator.clipboard.writeText(meta.sheets.live.url); toast('Live sheet link copied'); } catch { toast('Copy was blocked by the browser.'); } };
   const out = $('dvOut'); if (out) out.onclick = () => { Drive.disconnect(); setSync(); toast('Disconnected from Google Drive'); };
 }
 
