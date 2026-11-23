@@ -15,8 +15,11 @@ let bundles = [], trips = [], cur = '*', edit = null, photoBusy = 0, cmp = new S
 const edAdded = new Set();          // photos added in the open editor and not saved yet
 let queue = [];                     // Drive jobs waiting: {id, kind:'photo'|'sheet', bundleId, photoId, at, tries, err}
 const syncMeta = new Map();         // bundleId -> {id:'b:'+bundleId, folder, photos:{photoId: driveFileId}}
-const meta = { sync: { id: 'sync' }, sheets: { id: 'sheets', byDay: {} } };
+const meta = { sync: { id: 'sync' }, sheets: { id: 'sheets', byDay: {} }, mode: { id: 'mode', role: 'owner' } };
 let syncing = false, syncProg = '', lastErr = '';
+// View-only phones read someone else's shared notebook and never change it.
+// meta.mode = {role:'viewer', owner, pulled, modified, photos:{photoId: driveFileId}, sheets, today, root, missing}
+const isViewer = () => meta.mode.role === 'viewer';
 const urls = new Map();             // photoId -> object URL
 
 const newId = p => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -36,11 +39,24 @@ const today = () => new Date().toLocaleDateString('en-CA');
 const ago = t => { if (!t) return 'never'; const m = Math.round((Date.now() - t) / 60e3); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : m < 1440 ? Math.round(m / 60) + ' h ago' : new Date(t).toLocaleDateString(); };
 
 /* ---------- photos on the device ---------- */
+// On a view-only phone, a photo that isn't cached yet is downloaded from the owner's Drive and kept
+// on the phone, so it still shows offline.
+const phLoads = new Map();
 async function phUrl(id) {
   if (urls.has(id)) return urls.get(id);
-  const r = await DB.get('photos', id).catch(() => null);
-  if (!r?.blob) return '';
-  const u = URL.createObjectURL(r.blob); urls.set(id, u); return u;
+  if (phLoads.has(id)) return phLoads.get(id);
+  const p = (async () => {
+    let r = await DB.get('photos', id).catch(() => null);
+    if (!r?.blob && isViewer()) {
+      const did = meta.mode.photos?.[id];
+      if (!did || !Drive.token() || !navigator.onLine) return '';
+      try { r = { id, blob: await Drive.download(did), created: Date.now() }; await DB.put('photos', r); } catch { return ''; }
+    }
+    if (!r?.blob) return '';
+    const u = URL.createObjectURL(r.blob); urls.set(id, u); return u;
+  })();
+  phLoads.set(id, p);
+  try { return await p; } finally { phLoads.delete(id); }
 }
 const imgTag = (id, extra = '') => `<img data-ph="${esc(id)}"${urls.has(id) ? ` src="${urls.get(id)}"` : ''} ${extra}>`;
 function hydrate(root) { root.querySelectorAll('img[data-ph]:not([src])').forEach(async im => { const u = await phUrl(im.dataset.ph); if (u) im.src = u; }); }
@@ -68,7 +84,7 @@ async function fetchRates() {
   return { rates: invert(d.rates), date: new Date(d.time_last_update_unix * 1000).toISOString().slice(0, 10), source: 'ExchangeRate-API' };
 }
 async function refreshRates(force) {
-  if (refreshRates.busy || !navigator.onLine) return;
+  if (refreshRates.busy || !navigator.onLine || isViewer()) return;   // view-only phones use the owner's rates
   if (!force && meta.fx?.at && Date.now() - meta.fx.at < FX_MAX_AGE) return;
   refreshRates.busy = true;
   try {
@@ -147,7 +163,7 @@ function render() {
   }).join('');
   hydrate($('grid'));
   const e = $('empty'); e.style.display = v.length ? 'none' : 'block';
-  e.innerHTML = bundles.length ? 'No bundles match these filters.' : 'No bundles yet. Tap <b>+ Bundle</b> at the yard, snap the photos, and fill in what you see. Everything saves on this phone, with or without signal.';
+  e.innerHTML = bundles.length ? 'No bundles match these filters.' : isViewer() ? 'Nothing here yet. The shared notebook appears once you’re connected to Google and the owner has synced.' : 'No bundles yet. Tap <b>+ Bundle</b> at the yard, snap the photos, and fill in what you see. Everything saves on this phone, with or without signal.';
   $('cmpBar').style.display = cmp.size ? 'flex' : 'none'; $('cmpGo').textContent = `Compare ${cmp.size} bundle${cmp.size === 1 ? '' : 's'}`;
 }
 
@@ -214,12 +230,17 @@ function readForm() { for (const k of F) edit[k] = $(fid(k)).value; }
 // New bundles go to the trip whose chip you're viewing; on "All", to the most recently added trip.
 const newestTrip = () => trips.reduce((a, t) => (!a || (t.created || 0) >= (a.created || 0) ? t : a), null) || DAILY;
 function openEd(b) {
+  if (!b && isViewer()) return;
   const t = cur === '*' ? newestTrip() : tripOf(cur);
   edit = b ? structuredClone(b) : { id: null, tripId: t.id, cur: t.cur, dim: t.dim, pmode: t.pmode, status: 'considering', quality: 0, defects: [], photos: [], type: 'Quartzite', finish: 'Polished', thick: '3 cm' };
   edAdded.clear();
-  $('edT').textContent = b ? 'Edit bundle' : 'New bundle'; $('edDel').style.display = b ? '' : 'none';
+  $('edT').textContent = isViewer() ? 'Bundle' : b ? 'Edit bundle' : 'New bundle'; $('edDel').style.display = b ? '' : 'none';
+  $('edClose').textContent = isViewer() ? 'Close' : 'Cancel';
   $('f_trip').innerHTML = [DAILY, ...trips].map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
   for (const k of F) $(fid(k)).value = edit[k] ?? '';
+  // View only: fields can be read and scrolled but not changed.
+  for (const el of $('ed').querySelectorAll('.fields input, .fields textarea')) el.readOnly = isViewer();
+  for (const el of $('ed').querySelectorAll('.fields select')) el.disabled = isViewer();
   edRender(); $('ed').classList.add('on'); $('ed').firstElementChild.scrollTop = 0;
 }
 async function closeEd(saved) {
@@ -229,6 +250,7 @@ async function closeEd(saved) {
   edAdded.clear(); edit = null;
 }
 async function save() {
+  if (isViewer()) return;
   if (photoBusy) return toast('Wait for photos to finish saving.');
   readForm();
   const id = edit.id || newId('b'), old = bundles.find(b => b.id === id);
@@ -255,6 +277,7 @@ async function shrink(file) {
   } catch { return file; }
 }
 async function addPhotos(files) {
+  if (isViewer()) return;
   for (const f of files) {
     photoBusy++; edRender();
     try {
@@ -291,6 +314,7 @@ function tForm(t) {
   tFxNote();
 }
 async function saveTrip() {
+  if (isViewer()) return;
   const name = $('t_name').value.trim(); if (!name) return toast('Give the trip a name.');
   const c = $('t_cur').value, auto = c !== 'USD' && $('t_auto').checked;
   const rate = c === 'USD' ? 1 : (auto && fxRate(c)) || num($('t_rate').value);
@@ -349,7 +373,9 @@ async function enqueuePhotos(b) {
 const tripKey = tid => tid || 'daily';
 async function putJob(j) { await DB.put('queue', j); queue = queue.filter(x => x.id !== j.id).concat(j); }
 const enqueueTripSheet = tid => putJob({ id: 'sheet:' + tripKey(tid), kind: 'tripSheet', trip: tripKey(tid), at: Date.now(), tries: 0 });
-const enqueueSnapshot = () => putJob({ id: 'snapshot', kind: 'snapshot', at: Date.now(), tries: 0 });
+const enqueueData = () => putJob({ id: 'data', kind: 'data', at: Date.now(), tries: 0 });
+// Any change to bundles or trips also refreshes the shared data file that view-only phones read.
+const enqueueSnapshot = async () => { await putJob({ id: 'snapshot', kind: 'snapshot', at: Date.now(), tries: 0 }); await enqueueData(); };
 async function dropJob(id) { await DB.del('queue', id); queue = queue.filter(j => j.id !== id); }
 async function dropPhoto(p) {
   await DB.del('photos', p).catch(() => {}); await dropJob('p:' + p);
@@ -383,6 +409,7 @@ async function syncPhoto(j, ctx) {
   const r = await Drive.upload({ name: `${fileSlug(b.bundle)}_${i}_${j.photoId.slice(-6)}.jpg`, parents: [sm.folder] }, rec.blob);
   sm.photos[j.photoId] = r.id;
   await putSyncMeta(b.id, sm);
+  await enqueueData();   // view-only phones find photos through the data file
 }
 const sheetUrl = r => r.webViewLink || `https://docs.google.com/spreadsheets/d/${r.id}/edit`;
 // Remember sheets the app wrote but couldn't re-lock, so the Drive panel can say so.
@@ -432,10 +459,67 @@ async function syncSnapshot(ctx) {
   sh.last = { day, ...sh.byDay[day] };
   await DB.put('meta', sh);
 }
+/* ---------- view-only: read the shared notebook ---------- */
+let pulling = false;
+async function pullNotebook() {
+  if (pulling || !Drive.configured() || !navigator.onLine || !Drive.token()) { setSync(); return; }
+  pulling = true; lastErr = ''; setSync();
+  const m = meta.mode;
+  try {
+    const f = await Drive.findShared(DATA_NAME());
+    m.missing = !f;
+    if (f) {
+      const o = f.owners?.[0];
+      m.owner = o?.displayName || o?.emailAddress || 'the owner';
+      if (f.modifiedTime !== m.modified) {
+        const data = JSON.parse(await (await Drive.download(f.id)).text());
+        await DB.clear('bundles'); await DB.clear('trips');
+        for (const b of data.bundles || []) await DB.put('bundles', b);
+        for (const t of data.trips || []) await DB.put('trips', t);
+        bundles = data.bundles || []; trips = (data.trips || []).sort(byCreated);
+        Object.assign(m, { photos: data.photos || {}, sheets: data.sheets || {}, today: data.today, root: data.root, modified: f.modifiedTime, updated: data.updated });
+        if (data.fx) { meta.fx = { id: 'fx', ...data.fx, at: Date.now() }; await DB.put('meta', meta.fx); }
+        // drop cached photos that are no longer in the notebook
+        const keep = new Set(bundles.flatMap(b => b.photos || []));
+        for (const k of await DB.keys('photos')) if (!keep.has(k)) { await DB.del('photos', k); const u = urls.get(k); if (u) { URL.revokeObjectURL(u); urls.delete(k); } }
+        for (const id of [...cmp]) if (!bundles.some(b => b.id === id)) cmp.delete(id);
+      }
+      m.pulled = Date.now();
+    }
+    await DB.put('meta', m);
+  } catch (e) {
+    lastErr = e.code === 'auth' ? '' : (e.message || String(e));
+  } finally {
+    pulling = false; render(); setSync();
+    if ($('tp').classList.contains('on')) tpRender();
+  }
+}
+
+// The shared data file: every trip and bundle, plus where each photo and sheet is in Drive.
+// It sits in the Block & Bundle folder, so anyone the folder is shared with can view the notebook.
+const DATA_NAME = () => `${APP_NAME} data.json`;
+async function syncData(ctx) {
+  const photos = {};
+  for (const sm of syncMeta.values()) Object.assign(photos, sm.photos || {});
+  const body = {
+    app: APP_NAME, format: 1, updated: Date.now(), owner: Drive.email(),
+    trips, bundles, photos, sheets: meta.sheets.trips, today: meta.sheets.last || null, root: ctx.root,
+    fx: meta.fx ? { rates: meta.fx.rates, date: meta.fx.date, source: meta.fx.source } : null,
+  };
+  const blob = new Blob([JSON.stringify(body)], { type: 'application/json' });
+  let id = meta.sync.dataId;
+  if (id && !(await Drive.alive(id))) id = null;
+  if (!id) id = await Drive.findFile(DATA_NAME(), ctx.root, 'application/json');
+  const r = id ? await Drive.upload({ name: DATA_NAME() }, blob, id)
+    : await Drive.upload({ name: DATA_NAME(), parents: [ctx.root], mimeType: 'application/json', description: 'Read by Block & Bundle on view-only phones. Don’t edit or move it.' }, blob);
+  meta.sync.dataId = r.id; await DB.put('meta', meta.sync);
+}
+
 async function runSync() {
+  if (isViewer()) return pullNotebook();
   if (syncing || !queue.length || !Drive.configured() || !navigator.onLine || !Drive.token()) { setSync(); return; }
   syncing = true; lastErr = ''; setSync();
-  const rank = { photo: 0, tripSheet: 1, snapshot: 2 };   // photos first, so sheets can link their folders
+  const rank = { photo: 0, tripSheet: 1, snapshot: 2, data: 3 };   // photos first, so sheets and the data file can link them
   const jobs = [...queue].sort((a, b) => (rank[a.kind] ?? 3) - (rank[b.kind] ?? 3) || a.at - b.at);
   try {
     const root = await Drive.ensureRoot(APP_NAME, ['Bundle Book']);
@@ -449,6 +533,7 @@ async function runSync() {
         if (j.kind === 'photo') await syncPhoto(j, ctx);
         else if (j.kind === 'tripSheet') await syncTripSheet(j, ctx);
         else if (j.kind === 'snapshot') await syncSnapshot(ctx);
+        else if (j.kind === 'data') await syncData(ctx);
         if (queue.find(x => x.id === j.id)?.at === j.at) await dropJob(j.id);   // keep a newer sheet job queued during the run
       } catch (e) {
         if (e.code === 'auth' || e.code === 'offline') throw e;
@@ -466,16 +551,28 @@ async function runSync() {
 }
 
 const waitCounts = () => {
-  const ph = queue.filter(j => j.kind === 'photo').length, sh = queue.filter(j => j.kind === 'tripSheet').length, snap = queue.some(j => j.kind === 'snapshot');
-  const parts = [ph ? `${ph} photo${ph === 1 ? '' : 's'}` : '', sh ? `${sh} trip sheet${sh === 1 ? '' : 's'}` : (snap ? 'the daily copy' : '')].filter(Boolean);
+  const ph = queue.filter(j => j.kind === 'photo').length, sh = queue.filter(j => j.kind === 'tripSheet').length, snap = queue.some(j => j.kind === 'snapshot' || j.kind === 'data');
+  const parts = [ph ? `${ph} photo${ph === 1 ? '' : 's'}` : '', sh ? `${sh} trip sheet${sh === 1 ? '' : 's'}` : (snap ? 'the latest changes' : '')].filter(Boolean);
   return { n: ph + sh + (snap && !sh ? 1 : 0), text: parts.join(' and ') };
 };
 const jobLabel = j => j.kind === 'photo' ? 'Photo for ' + (bundles.find(b => b.id === j.bundleId)?.material || 'a bundle')
-  : j.kind === 'tripSheet' ? 'Sheet for ' + tripOf(j.trip === 'daily' ? '' : j.trip).name : 'Daily copy';
+  : j.kind === 'tripSheet' ? 'Sheet for ' + tripOf(j.trip === 'daily' ? '' : j.trip).name : j.kind === 'data' ? 'Shared data file' : 'Daily copy';
 
 function setSync() {
   const { n, text: waiting } = waitCounts();
   let s, lbl, dot;
+  if (isViewer()) {
+    const m = meta.mode, who = esc(m.owner || 'the owner'), when = m.pulled ? ` from ${ago(m.pulled)}` : '';
+    lbl = 'Shared';
+    if (pulling) { s = 'Getting the latest from Google Drive…'; dot = 'wait'; }
+    else if (!Drive.token()) { s = (m.pulled ? `View only: ${who}'s notebook${when}. ` : '') + 'Connect Google to get the latest.'; lbl = 'Connect'; dot = 'bad'; }
+    else if (m.missing) { s = 'No shared notebook found yet. Ask the owner to share the Block & Bundle folder with ' + (Drive.email() || 'your Google account') + '.'; dot = 'bad'; }
+    else if (!navigator.onLine) { s = `Offline. View only: ${who}'s notebook${when}.`; dot = 'wait'; }
+    else { s = `View only: ${who}'s notebook · updated ${ago(m.pulled)}.` + (lastErr ? ' Last try failed: ' + lastErr : ''); dot = lastErr ? 'bad' : 'ok'; }
+    $('status').textContent = s; $('driveLbl').textContent = lbl; $('driveDot').className = 'dot ' + dot;
+    if ($('dv').classList.contains('on')) dvRender();
+    return;
+  }
   if (!Drive.configured()) { s = 'Saved on this device. Drive sync is off until the Google client ID is set.'; lbl = 'Drive'; dot = ''; }
   else if (syncing) { s = `Sending to Google Drive… ${syncProg}`; lbl = 'Syncing…'; dot = 'wait'; }
   else if (!n && !meta.sync.last) { s = bundles.length ? 'Saved on this device.' : 'Everything you add saves on this device first.'; lbl = 'Drive'; dot = ''; }
@@ -488,7 +585,48 @@ function setSync() {
 }
 
 /* ---------- Drive panel ---------- */
+function dvRenderViewer() {
+  const m = meta.mode, tok = !!Drive.token(), on = navigator.onLine;
+  const sheetRows = [DAILY, ...trips].map(t => ({ t, ent: (m.sheets || {})[tripKey(t.id)] })).filter(x => x.ent);
+  $('dvBody').innerHTML = `
+   <p class="sub">${esc($('status').textContent)}</p>
+   <div class="acts" style="margin-top:14px">
+     <button class="pri" id="dvGo" ${on ? '' : 'disabled'}>${tok ? 'Get latest' : 'Connect Google'}</button>
+     <button id="dvLeave" class="danger">Stop viewing</button>
+   </div>
+   <dl class="kv">
+     <dt>Your account</dt><dd>${tok || Drive.email() ? esc(Drive.email() || 'Connected') + (tok ? '' : ' (sign-in expired)') : 'Not connected'}</dd>
+     <dt>Notebook of</dt><dd>${esc(m.owner || 'Not found yet')}</dd>
+     <dt>Last updated</dt><dd>${m.updated ? esc(new Date(m.updated).toLocaleString()) : '—'}</dd>
+     <dt>Drive folder</dt><dd>${m.root ? `<a href="https://drive.google.com/drive/folders/${esc(m.root)}" target="_blank" rel="noopener">Block &amp; Bundle</a>` : '—'}</dd>
+     <dt>Today's copy</dt><dd>${m.today ? `<a href="${esc(m.today.url)}" target="_blank" rel="noopener">All trips — ${esc(m.today.day)}</a>` : '—'}</dd>
+   </dl>
+   <h3>Trip sheets</h3>
+   ${sheetRows.length ? sheetRows.map(({ t, ent }) => `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:1px solid var(--line);padding:8px 0">
+     <a href="${esc(ent.url)}" target="_blank" rel="noopener">${esc(t.name)}</a><button data-copy="${esc(ent.url)}" style="min-height:34px">Copy link</button></div>`).join('') : '<p class="note">None yet.</p>'}
+   <p class="note" style="margin-top:16px">This phone shows someone else's notebook, view only. It gets the latest whenever it opens online (and every few minutes while open), and keeps a copy with photos for offline viewing. Google sign-in lasts about an hour; tap Connect Google to refresh it.</p>`;
+  $('dvGo').onclick = () => tok ? pullNotebook() : Drive.connect('viewer');
+  $('dvBody').querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast('Sheet link copied'); } catch { toast('Copy was blocked by the browser.'); } });
+  $('dvLeave').onclick = () => confirmDel('Stop viewing this notebook?', 'The copy on this phone is removed. Nothing changes in Drive, and you can view it again any time.', leaveViewer);
+}
+
+// Switch this phone between its own notebook and viewing someone else's.
+async function becomeViewer() {
+  if (bundles.length) return toast('This phone already has its own bundles. View a shared notebook on a phone without any.');
+  meta.mode = { id: 'mode', role: 'viewer' }; await DB.put('meta', meta.mode);
+  for (const s of ['queue', 'trips', 'photos']) await DB.clear(s);
+  queue = []; trips = [];
+  Drive.disconnect();   // the viewer needs read access to shared files, so sign in again with that
+  Drive.connect('viewer');
+}
+async function leaveViewer() {
+  for (const s of ['bundles', 'trips', 'photos', 'queue']) await DB.clear(s);
+  meta.mode = { id: 'mode', role: 'owner' }; await DB.put('meta', meta.mode);
+  Drive.disconnect(); location.reload();
+}
+
 async function dvRender() {
+  if (isViewer()) return dvRenderViewer();
   const conf = Drive.configured(), tok = !!Drive.token(), on = navigator.onLine;
   const fails = queue.filter(j => j.tries && j.err);
   const wait = waitCounts().text;
@@ -521,7 +659,17 @@ async function dvRender() {
    ${fails.length ? `<h3 style="margin-top:16px">Couldn't send</h3><ul class="note">${fails.map(j => `<li>${esc(jobLabel(j))}: ${esc(j.err)} (${j.tries} tr${j.tries === 1 ? 'y' : 'ies'})</li>`).join('')}</ul>` : ''}
    ${Object.keys(meta.sheets.unlocked || {}).length ? `<h3 style="margin-top:16px">Not locked</h3><ul class="note">${Object.values(meta.sheets.unlocked).map(u => `<li>${esc(u.name)}: Drive refused the lock (${esc(u.err)}). The next sync tries again.</li>`).join('')}</ul>` : ''}
    <p class="note" style="margin-top:16px">Each trip has its own Google Sheet in Block &amp; Bundle › Sheets, replaced with that trip's bundles on every sync. The sheets are locked, so they open view-only and changes are made here in the app. A sheet's link never changes, even if you rename the trip, so you can pull it into your own spreadsheet with <code>=IMPORTRANGE("link", "A1:AZ")</code>. A dated copy of all trips is kept in Sheets › Daily copies. Photos go to Photos › trip › bundle. Deleting a bundle here doesn't delete its copies in Drive.</p>
-   <p class="note">Google sign-in lasts about an hour. After that, anything new waits here until you tap Reconnect.</p>`;
+   <p class="note">Google sign-in lasts about an hour. After that, anything new waits here until you tap Reconnect.</p>
+   <h3 style="margin-top:16px">Sharing</h3>
+   <p class="note">To let someone view this notebook and its sheets:</p>
+   <ol class="note" style="padding-left:20px;margin:4px 0">
+     <li>In Google Drive, share the <b>Block &amp; Bundle</b> folder with them as <b>Viewer</b>.</li>
+     <li>In Google Cloud, add their Google account as a <b>test user</b> for this app.</li>
+     <li>On their phone, they install this app, tap <b>Drive</b> then <b>View a shared notebook</b>, and sign in.</li>
+   </ol>
+   <p class="note">They see your bundles and photos, view only, updated each time your phone syncs.</p>
+   ${bundles.length ? '' : '<button id="dvView" style="margin-top:8px">View a shared notebook</button>'}`;
+  const vw = $('dvView'); if (vw) vw.onclick = () => conf ? becomeViewer() : toast('Google sign-in isn’t set up in this copy of the app.');
   const go = $('dvGo'); if (go) go.onclick = () => tok ? runSync() : Drive.connect();
   $('dvBody').querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast('Sheet link copied'); } catch { toast('Copy was blocked by the browser.'); } });
   const out = $('dvOut'); if (out) out.onclick = () => { Drive.disconnect(); setSync(); toast('Disconnected from Google Drive'); };
@@ -570,12 +718,13 @@ $('grid').addEventListener('click', e => {
 $('grid').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.classList.contains('card')) openEd(bundles.find(b => b.id === e.target.dataset.id)); });
 $('newBtn').onclick = () => openEd(null); $('edClose').onclick = () => closeEd(false); $('edSave').onclick = save;
 $('ed').addEventListener('input', e => { if (edit && e.target.matches('input,select')) edCalc(); });
-$('u_dim').onclick = e => { const b = e.target.closest('[data-v]'); if (b) { readForm(); edit.dim = b.dataset.v; edRender(); } };
-$('u_q').onclick = e => { const b = e.target.closest('[data-v]'); if (b) { readForm(); edit.quality = +b.dataset.v; edRender(); } };
-$('u_st').onclick = e => { const b = e.target.closest('[data-v]'); if (b) { readForm(); edit.status = b.dataset.v; edRender(); } };
-$('u_def').onclick = e => { const b = e.target.closest('[data-d]'); if (!b) return; readForm(); const d = b.dataset.d, s = new Set(edit.defects || []); s.has(d) ? s.delete(d) : s.add(d); edit.defects = [...s]; edRender(); };
+$('u_dim').onclick = e => { if (isViewer()) return; const b = e.target.closest('[data-v]'); if (b) { readForm(); edit.dim = b.dataset.v; edRender(); } };
+$('u_q').onclick = e => { if (isViewer()) return; const b = e.target.closest('[data-v]'); if (b) { readForm(); edit.quality = +b.dataset.v; edRender(); } };
+$('u_st').onclick = e => { if (isViewer()) return; const b = e.target.closest('[data-v]'); if (b) { readForm(); edit.status = b.dataset.v; edRender(); } };
+$('u_def').onclick = e => { if (isViewer()) return; const b = e.target.closest('[data-d]'); if (!b) return; readForm(); const d = b.dataset.d, s = new Set(edit.defects || []); s.has(d) ? s.delete(d) : s.add(d); edit.defects = [...s]; edRender(); };
 $('phs').onclick = e => {
   const t = e.target;
+  if (isViewer() && !t.dataset.big) return;
   if (t.closest('#addph')) { if (!photoBusy) $('file').click(); return; }
   if (t.dataset.rm) { readForm(); edit.photos.splice(+t.dataset.rm, 1); edRender(); return; }
   if (t.dataset.cover) { readForm(); const i = +t.dataset.cover, [p] = edit.photos.splice(i, 1); edit.photos.unshift(p); edRender(); return; }
@@ -584,7 +733,7 @@ $('phs').onclick = e => {
 $('phs').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'addph') $('file').click(); });
 $('file').onchange = e => { readForm(); addPhotos([...e.target.files]); e.target.value = ''; };
 $('lbX').onclick = $('lb').onclick = e => { if (e.target !== $('lbImg')) $('lb').classList.remove('on'); };
-$('edDel').onclick = () => confirmDel('Delete this bundle?', 'Its notes and photos are removed from this device. Copies already in Google Drive stay there.', async () => {
+$('edDel').onclick = () => !isViewer() && confirmDel('Delete this bundle?', 'Its notes and photos are removed from this device. Copies already in Google Drive stay there.', async () => {
   try {
     const b = bundles.find(x => x.id === edit.id);
     await DB.del('bundles', b.id);
@@ -597,7 +746,7 @@ $('edDel').onclick = () => confirmDel('Delete this bundle?', 'Its notes and phot
 });
 $('cfNo').onclick = () => $('cf').classList.remove('on'); $('cfYes').onclick = () => { $('cf').classList.remove('on'); cfCb && cfCb(); };
 $('tripBtn').onclick = () => { tpRender(); tForm(); $('tp').classList.add('on'); }; $('tpClose').onclick = () => $('tp').classList.remove('on');
-$('tpList').onclick = e => { const b = e.target.closest('[data-et]'); if (b) tForm(trips.find(t => t.id === b.dataset.et)); };
+$('tpList').onclick = e => { if (isViewer()) return; const b = e.target.closest('[data-et]'); if (b) tForm(trips.find(t => t.id === b.dataset.et)); };
 $('tSave').onclick = saveTrip; $('tNew').onclick = () => tForm();
 $('t_cur').onchange = tFxNote;
 $('t_auto').onchange = tFxNote;
@@ -613,7 +762,7 @@ document.addEventListener('keydown', e => {
 addEventListener('online', () => { setSync(); kick(500); refreshRates(); });
 addEventListener('offline', setSync);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { setSync(); kick(500); refreshRates(); } });
-setInterval(() => { if (document.visibilityState === 'visible' && queue.length) runSync(); else setSync(); }, 5 * 60e3);
+setInterval(() => { if (document.visibilityState === 'visible' && (queue.length || isViewer())) runSync(); else setSync(); }, 5 * 60e3);
 
 /* ---------- install + updates ---------- */
 let installEvt = null;
@@ -642,17 +791,22 @@ if ('serviceWorker' in navigator) {
     trips.sort((a, b) => (a.created || 0) - (b.created || 0));
     for (const m of all) { if (m.id.startsWith('b:')) syncMeta.set(m.id.slice(2), m); else meta[m.id] = m; }
     meta.sheets.byDay ||= {}; meta.sheets.trips ||= {};
-    // Older versions queued one 'sheet' job; replace it with the per-trip jobs below.
-    if (queue.some(j => j.kind === 'sheet')) { await dropJob('sheet'); await enqueueSnapshot(); }
-    // Every trip gets its own sheet: queue one for any trip (or a non-empty Day-to-day) that doesn't have one yet.
-    const want = [...trips.map(t => t.id), ...(bundles.some(b => !b.tripId) ? [''] : [])];
-    for (const tid of want) if (!meta.sheets.trips[tripKey(tid)] && !queue.some(j => j.id === 'sheet:' + tripKey(tid))) await enqueueTripSheet(tid);
-    // Sheets written by an older version (different columns, or before locking): rewrite them once.
-    // Bump SHEET_FORMAT whenever the sheet columns change.
-    if ((meta.sheets.format || 0) < SHEET_FORMAT) {
-      for (const key of Object.keys(meta.sheets.trips)) await enqueueTripSheet(key === 'daily' ? '' : key);
-      if (meta.sheets.byDay[today()]) await enqueueSnapshot();
-      meta.sheets.format = SHEET_FORMAT; await DB.put('meta', meta.sheets);
+    document.body.classList.toggle('viewer', isViewer());
+    if (!isViewer()) {
+      // Older versions queued one 'sheet' job; replace it with the per-trip jobs below.
+      if (queue.some(j => j.kind === 'sheet')) { await dropJob('sheet'); await enqueueSnapshot(); }
+      // Every trip gets its own sheet: queue one for any trip (or a non-empty Day-to-day) that doesn't have one yet.
+      const want = [...trips.map(t => t.id), ...(bundles.some(b => !b.tripId) ? [''] : [])];
+      for (const tid of want) if (!meta.sheets.trips[tripKey(tid)] && !queue.some(j => j.id === 'sheet:' + tripKey(tid))) await enqueueTripSheet(tid);
+      // Sheets written by an older version (different columns, or before locking): rewrite them once.
+      // Bump SHEET_FORMAT whenever the sheet columns change.
+      if ((meta.sheets.format || 0) < SHEET_FORMAT) {
+        for (const key of Object.keys(meta.sheets.trips)) await enqueueTripSheet(key === 'daily' ? '' : key);
+        if (meta.sheets.byDay[today()]) await enqueueSnapshot();
+        meta.sheets.format = SHEET_FORMAT; await DB.put('meta', meta.sheets);
+      }
+      // Versions before sharing never wrote the shared data file.
+      if (!meta.sync.dataId && (bundles.length || trips.length) && !queue.some(j => j.id === 'data')) await enqueueData();
     }
   } catch (e) {
     $('status').textContent = 'This browser won’t let Block & Bundle store data (' + (e?.message || e) + '). Private browsing can cause this.';

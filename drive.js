@@ -1,8 +1,9 @@
 // Google sign-in (OAuth 2.0 token flow by full-page redirect, which also works inside an
 // installed iPhone web app where pop-ups don't) and the few Drive API calls Block & Bundle needs.
-// Scope drive.file: the app can only see files and folders it created itself.
+// Owner scope drive.file: the app can only see files and folders it created itself.
+// Viewer scope drive.readonly: needed to read a notebook someone else shared; it can't change anything.
 window.Drive = (() => {
-  const SCOPE = 'https://www.googleapis.com/auth/drive.file';
+  const SCOPES = { owner: 'https://www.googleapis.com/auth/drive.file', viewer: 'https://www.googleapis.com/auth/drive.readonly' };
   const API = 'https://www.googleapis.com/drive/v3';
   const UP = 'https://www.googleapis.com/upload/drive/v3';
   const FOLDER = 'application/vnd.google-apps.folder';
@@ -25,13 +26,13 @@ window.Drive = (() => {
     return t && t.exp > Date.now() + 60e3 ? t.v : null;
   }
 
-  function connect() {
+  function connect(role = 'owner') {
     if (!configured()) throw err('config', 'Add your OAuth client ID to config.js first.');
     const state = crypto.randomUUID();
     ls.set(K.state, state);
     const p = new URLSearchParams({
       client_id: clientId(), redirect_uri: redirectUri(), response_type: 'token',
-      scope: SCOPE, include_granted_scopes: 'true', state,
+      scope: SCOPES[role] || SCOPES.owner, include_granted_scopes: 'true', state,
     });
     if (email()) p.set('login_hint', email());
     location.assign('https://accounts.google.com/o/oauth2/v2/auth?' + p);
@@ -57,7 +58,7 @@ window.Drive = (() => {
     if (t?.v) fetch('https://oauth2.googleapis.com/revoke?token=' + encodeURIComponent(t.v), { method: 'POST', mode: 'no-cors' }).catch(() => {});
   }
 
-  async function g(url, o = {}) {
+  async function g(url, o = {}, as = 'json') {
     const t = token();
     if (!t) throw err('auth', 'Google sign-in needed');
     let r;
@@ -69,7 +70,16 @@ window.Drive = (() => {
       try { m = (await r.json()).error?.message || ''; } catch {}
       throw err('http', m || 'Drive error ' + r.status, { status: r.status });
     }
+    if (as === 'blob') return r.blob();
     return r.status === 204 ? null : r.json();
+  }
+
+  // Viewer: a file's content, and the newest copy of a shared notebook not owned by this account.
+  const download = id => g(API + '/files/' + encodeURIComponent(id) + '?alt=media', {}, 'blob');
+  async function findShared(name) {
+    const q = `name = '${qv(name)}' and trashed = false`;
+    const r = await g(API + '/files?' + new URLSearchParams({ q, orderBy: 'modifiedTime desc', pageSize: '10', fields: 'files(id,modifiedTime,ownedByMe,owners(displayName,emailAddress))' }));
+    return (r.files || []).find(f => !f.ownedByMe) || null;
   }
 
   async function whoami() {
@@ -158,5 +168,5 @@ window.Drive = (() => {
     return r;
   }
 
-  return { configured, writeLocked, token, connect, disconnect, handleRedirect, whoami, email, ensureFolder, ensureRoot, findFile, findByProp, alive, upload, redirectUri, SHEET };
+  return { configured, writeLocked, download, findShared, token, connect, disconnect, handleRedirect, whoami, email, ensureFolder, ensureRoot, findFile, findByProp, alive, upload, redirectUri, SHEET };
 })();

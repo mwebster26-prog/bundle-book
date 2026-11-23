@@ -113,6 +113,27 @@ Then open the app, tap **Drive**, tap **Connect Google Drive**, and approve.
 
 On iPhone, an installed web app keeps storage separate from Safari. Use the installed app, not a Safari tab, or you'll end up with two separate notebooks.
 
+## Sharing with someone (view only)
+
+One phone owns the notebook and makes all the changes. Other people can view it, with its photos and sheets, on their own phones.
+
+**How it works:** on every sync the owner's phone also writes `Block & Bundle data.json` to the Block & Bundle folder. It holds every trip and bundle, plus where each photo and sheet is. A view-only phone reads that file and downloads the photos, keeping a copy for offline viewing. It has no add, edit or delete controls, and it never writes to Drive.
+
+**Setup (owner):**
+1. **Google Drive:** share the **Block & Bundle** folder with the other person's Google account as **Viewer**.
+2. **Google Cloud console, Google Auth Platform › Audience › Test users:** add their Google account.
+3. **Google Cloud console, Data access:** add the scope `https://www.googleapis.com/auth/drive.readonly`. View-only phones need it to read files someone else shared with them.
+
+**Setup (viewer):**
+1. Open the app's address and add it to the home screen.
+2. In the app, tap **Drive**, then **View a shared notebook**. This button only shows on a phone with no bundles of its own.
+3. Sign in with the account the folder was shared with, and allow read access to Google Drive.
+
+**Day to day:**
+- The viewer's app fetches the latest version whenever it opens online, and every few minutes while open.
+- Google sign-in lasts about an hour, so after that the viewer taps **Connect Google** to refresh it.
+- **Drive › Stop viewing** removes the copy from that phone and turns it back into a normal notebook.
+
 ## Deploying changes
 
 The app is served cache-first. After changing any file, bump `VERSION` in `sw.js` (`bb-v1` → `bb-v2`) before pushing. The next time the app opens online it fetches the new version and shows a **Reload** prompt.

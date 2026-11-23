@@ -37,5 +37,7 @@ window.DB = (() => {
     get: (s, id) => run(s, 'readonly', st => st.get(id)),
     put: (s, v) => run(s, 'readwrite', st => st.put(v)),
     del: (s, id) => run(s, 'readwrite', st => st.delete(id)),
+    keys: s => run(s, 'readonly', st => st.getAllKeys()),
+    clear: s => run(s, 'readwrite', st => st.clear()),
   };
 })();

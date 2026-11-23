@@ -101,6 +101,10 @@ th{font-size:13px;color:var(--mute);width:130px}td img{width:150px;aspect-ratio:
 .conv b{font-weight:600}
 .kv{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 16px;margin:16px 0;font-size:15px}.kv dt{color:var(--mute)}.kv dd{margin:0;overflow-wrap:anywhere}
 code{font-size:13px;background:var(--panel);padding:2px 6px;border-radius:4px;overflow-wrap:anywhere}
+/* View-only phones: everything that changes the notebook is hidden */
+body.viewer #newBtn,body.viewer #edSave,body.viewer #edDel,body.viewer #addph,body.viewer .photos .x,body.viewer #mic,body.viewer #tpEdit,body.viewer [data-et]{display:none!important}
+body.viewer #ed .seg button,body.viewer #ed .defects button{pointer-events:none}
+body.viewer #ed .fields select{opacity:1;color:var(--ink)}
 .fab{position:fixed;right:max(16px,env(safe-area-inset-right));bottom:calc(16px + env(safe-area-inset-bottom));z-index:5;min-height:56px;padding:0 22px;border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,.25);font-size:18px}
 @media(max-width:600px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.fields{grid-template-columns:minmax(0,1fr)}.calc{grid-template-columns:repeat(2,minmax(0,1fr))}.grid{grid-template-columns:minmax(0,1fr)}}
 @media(prefers-reduced-motion:no-preference){.sheet>.in{animation:sl .22s ease-out}@keyframes sl{from{transform:translateX(40px);opacity:.6}}}
@@ -167,6 +171,7 @@ code{font-size:13px;background:var(--panel);padding:2px 6px;border-radius:4px;ov
   <div class="sheethead"><h2 id="tpT">Trips</h2><button id="tpClose">Done</button></div>
   <p class="note">Each trip sets its currency and the exchange rate you're using, so every bundle converts to USD per sq ft. Update the rate when it moves; totals recalculate.</p>
   <div id="tpList"></div>
+  <div id="tpEdit">
   <h3 style="margin-top:20px">Add or edit a trip</h3>
   <div class="fields">
     <div class="full"><label for="t_name">Trip name</label><input id="t_name" placeholder="Brazil — March 2027"></div>
@@ -176,6 +181,7 @@ code{font-size:13px;background:var(--panel);padding:2px 6px;border-radius:4px;ov
     <div><label for="t_dim">Default size unit</label><select id="t_dim"><option value="cm">cm</option><option value="in">inches</option></select></div>
     <div><label for="t_pmode">Default price per</label><select id="t_pmode"></select></div>
     <div class="full" style="display:flex;gap:8px"><button class="pri" id="tSave">Save trip</button><button id="tNew">Clear form</button></div>
+  </div>
   </div>
 </div></div>
 
